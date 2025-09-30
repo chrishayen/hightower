@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-mdns = "0.1.0"
+hightower-mdns = { git = "https://github.com/chrishayen/hightower-mdns.git" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 ```
 
