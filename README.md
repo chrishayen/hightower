@@ -10,6 +10,7 @@ A naive Rust implementation of mDNS (Multicast DNS) for advertising and discover
 - Configurable broadcast intervals
 - Configurable domain (defaults to `.local` per RFC 6762)
 - Host discovery callbacks
+- Query response callbacks
 - Async/await support with Tokio
 
 ## Installation
@@ -85,32 +86,27 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
-### Querying Discovered Hosts
+### Querying for Specific Hosts
 
 ```rust
 use hightower_mdns::Mdns;
 use std::net::Ipv4Addr;
-use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
     let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
-        .on_host_discovered(move |hostname| {
-            println!("Discovered: {}", hostname);
-            let _ = tx.send(hostname);
+        .on_query_response(|hostname| {
+            println!("Query response from: {}", hostname);
         });
 
-    // Spawn a task to handle discovered hosts
+    // Start the mDNS service in a separate task
+    let mdns_clone = &mdns;
     tokio::spawn(async move {
-        while let Some(hostname) = rx.recv().await {
-            // Process discovered host (query, store, etc.)
-            println!("Processing: {}", hostname);
-        }
+        mdns_clone.run().await;
     });
 
-    mdns.run().await;
+    // Query for a specific host
+    mdns.query("otherhost").await;
 
     Ok(())
 }

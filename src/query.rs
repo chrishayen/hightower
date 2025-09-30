@@ -4,7 +4,7 @@ use socket2::Socket;
 
 use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
 use crate::packet::{build_mdns_packet, build_mdns_query, parse_mdns_query, parse_mdns_response};
-use crate::HostDiscoveryCallback;
+use crate::{HostDiscoveryCallback, QueryResponseCallback};
 
 /// Send a query for a specific hostname
 ///
@@ -24,7 +24,7 @@ pub async fn query(socket: &Socket, hostname: &str, domain: &str) {
 }
 
 /// Listen for and respond to mDNS queries
-pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, on_host_discovered: Option<HostDiscoveryCallback>) {
+pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, on_host_discovered: Option<HostDiscoveryCallback>, on_query_response: Option<QueryResponseCallback>) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 
     loop {
@@ -49,7 +49,12 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &
                     let expected_name = format!("{}.{}", name, domain);
                     if hostname != expected_name {
                         log::info!("Discovered host: {}", hostname);
+
+                        // Call both callbacks if present
                         if let Some(ref callback) = on_host_discovered {
+                            callback(hostname.clone());
+                        }
+                        if let Some(ref callback) = on_query_response {
                             callback(hostname);
                         }
                     }

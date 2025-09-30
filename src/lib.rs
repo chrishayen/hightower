@@ -15,6 +15,9 @@ use socket::{create_send_socket, create_recv_socket};
 /// Callback function type for host discovery notifications
 pub type HostDiscoveryCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Callback function type for query response notifications
+pub type QueryResponseCallback = Arc<dyn Fn(String) + Send + Sync>;
+
 /// mDNS service for advertising a hostname on the local network
 pub struct Mdns {
     name: String,
@@ -24,6 +27,7 @@ pub struct Mdns {
     recv_socket: Socket,
     local_ip: Ipv4Addr,
     on_host_discovered: Option<HostDiscoveryCallback>,
+    on_query_response: Option<QueryResponseCallback>,
 }
 
 impl Mdns {
@@ -65,6 +69,7 @@ impl Mdns {
             recv_socket,
             local_ip: ip,
             on_host_discovered: None,
+            on_query_response: None,
         })
     }
 
@@ -91,6 +96,19 @@ impl Mdns {
         self
     }
 
+    /// Set a callback to be invoked when a query response is received
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - Function to call with the hostname when a response is received
+    pub fn on_query_response<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.on_query_response = Some(Arc::new(callback));
+        self
+    }
+
     /// Get the name being advertised
     pub fn name(&self) -> &str {
         &self.name
@@ -109,7 +127,7 @@ impl Mdns {
     pub async fn run(&self) {
         tokio::join!(
             broadcast::broadcast_loop(&self.send_socket, &self.name, &self.domain, self.local_ip, self.broadcast_interval),
-            query::listen(&self.recv_socket, &self.send_socket, &self.name, &self.domain, self.local_ip, self.on_host_discovered.clone())
+            query::listen(&self.recv_socket, &self.send_socket, &self.name, &self.domain, self.local_ip, self.on_host_discovered.clone(), self.on_query_response.clone())
         );
     }
 
