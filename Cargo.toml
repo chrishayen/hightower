@@ -14,7 +14,8 @@ exclude = [
   "rfc6762.txt",
   ".gitignore",
   ".github",
-  "cargo_vcs_info.json",
+  ".cargo_vcs_info.json",
+  "README.md"
 ]
 
 [dependencies]
