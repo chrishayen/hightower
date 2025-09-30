@@ -115,6 +115,95 @@ pub fn parse_mdns_query(packet: &[u8]) -> Option<String> {
     }
 }
 
+/// Parse an mDNS response/announcement packet and extract hostname
+pub fn parse_mdns_response(packet: &[u8]) -> Option<String> {
+    if packet.len() < 12 {
+        return None;
+    }
+
+    // Check if it's a response (QR bit should be 1)
+    if packet[2] & 0x80 == 0 {
+        return None;
+    }
+
+    // Get answer count
+    let answer_count = u16::from_be_bytes([packet[6], packet[7]]);
+    if answer_count == 0 {
+        return None;
+    }
+
+    // Skip questions section
+    let mut pos = 12;
+    let question_count = u16::from_be_bytes([packet[4], packet[5]]);
+
+    for _ in 0..question_count {
+        while pos < packet.len() && packet[pos] != 0 {
+            let len = packet[pos] as usize;
+            pos += 1 + len;
+        }
+        pos += 1;
+        pos += 4; // Skip QTYPE and QCLASS
+    }
+
+    if pos >= packet.len() {
+        return None;
+    }
+
+    // Parse hostname from first answer
+    let mut name_parts = Vec::new();
+
+    while pos < packet.len() {
+        let len = packet[pos] as usize;
+
+        // Handle DNS compression pointer
+        if len >= 0xC0 {
+            if pos + 1 >= packet.len() {
+                return None;
+            }
+            let offset = (u16::from_be_bytes([packet[pos] & 0x3F, packet[pos + 1]])) as usize;
+            let mut offset_pos = offset;
+            while offset_pos < packet.len() {
+                let offset_len = packet[offset_pos] as usize;
+                if offset_len == 0 || offset_len >= 0xC0 {
+                    break;
+                }
+                offset_pos += 1;
+                if offset_pos + offset_len > packet.len() {
+                    return None;
+                }
+                if let Ok(label) = std::str::from_utf8(&packet[offset_pos..offset_pos + offset_len]) {
+                    name_parts.push(label.to_string());
+                }
+                offset_pos += offset_len;
+            }
+            break;
+        }
+
+        if len == 0 {
+            break;
+        }
+
+        pos += 1;
+        if pos + len > packet.len() {
+            return None;
+        }
+
+        if let Ok(label) = std::str::from_utf8(&packet[pos..pos + len]) {
+            name_parts.push(label.to_string());
+        } else {
+            return None;
+        }
+
+        pos += len;
+    }
+
+    if name_parts.is_empty() {
+        None
+    } else {
+        Some(name_parts.join("."))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

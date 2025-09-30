@@ -6,10 +6,14 @@ mod socket;
 
 use std::io;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::Duration;
 use socket2::Socket;
 
 use socket::{create_send_socket, create_recv_socket};
+
+/// Callback function type for host discovery notifications
+pub type HostDiscoveryCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// mDNS service for advertising a hostname on the local network
 pub struct Mdns {
@@ -18,6 +22,7 @@ pub struct Mdns {
     send_socket: Socket,
     recv_socket: Socket,
     local_ip: Ipv4Addr,
+    on_host_discovered: Option<HostDiscoveryCallback>,
 }
 
 impl Mdns {
@@ -57,7 +62,21 @@ impl Mdns {
             send_socket,
             recv_socket,
             local_ip: ip,
+            on_host_discovered: None,
         })
+    }
+
+    /// Set a callback to be invoked when a new host is discovered
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - Function to call with the hostname when discovered
+    pub fn on_host_discovered<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.on_host_discovered = Some(Arc::new(callback));
+        self
     }
 
     /// Get the name being advertised
@@ -78,7 +97,7 @@ impl Mdns {
     pub async fn run(&self) {
         tokio::join!(
             broadcast::broadcast_loop(&self.send_socket, &self.name, self.local_ip, self.broadcast_interval),
-            query::listen(&self.recv_socket, &self.send_socket, &self.name, self.local_ip)
+            query::listen(&self.recv_socket, &self.send_socket, &self.name, self.local_ip, self.on_host_discovered.clone())
         );
     }
 

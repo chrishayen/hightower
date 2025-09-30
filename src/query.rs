@@ -3,7 +3,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use socket2::Socket;
 
 use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
-use crate::packet::{build_mdns_packet, build_mdns_query, parse_mdns_query};
+use crate::packet::{build_mdns_packet, build_mdns_query, parse_mdns_query, parse_mdns_response};
+use crate::HostDiscoveryCallback;
 
 /// Send a query for a specific hostname
 ///
@@ -22,7 +23,7 @@ pub async fn query(socket: &Socket, hostname: &str) {
 }
 
 /// Listen for and respond to mDNS queries
-pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4Addr) {
+pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4Addr, on_host_discovered: Option<HostDiscoveryCallback>) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 
     loop {
@@ -33,11 +34,23 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4A
                     std::slice::from_raw_parts(buf.as_ptr() as *const u8, len)
                 };
 
+                // Check for queries
                 if let Some(query_name) = parse_mdns_query(data) {
                     let expected_name = format!("{}.local", name);
                     if query_name == expected_name {
                         log::debug!("Received query for {}.local, sending response", name);
                         respond_to_query(send_socket, name, ip).await;
+                    }
+                }
+
+                // Check for responses/announcements
+                if let Some(hostname) = parse_mdns_response(data) {
+                    let expected_name = format!("{}.local", name);
+                    if hostname != expected_name {
+                        log::info!("Discovered host: {}", hostname);
+                        if let Some(ref callback) = on_host_discovered {
+                            callback(hostname);
+                        }
                     }
                 }
             }
