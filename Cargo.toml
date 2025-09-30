@@ -13,6 +13,8 @@ exclude = [
   "CLAUDE.md",
   "rfc6762.txt",
   ".gitignore",
+  ".github",
+  "cargo_vcs_info.json",
 ]
 
 [dependencies]
