@@ -53,6 +53,8 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
+![Example of mDNS discovery on a local network](docs/images/example-discovery.png)
+
 ### Querying for Hosts
 
 ```rust
@@ -142,7 +144,33 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
-## How It Works
+## How mDNS Works
+
+Multicast DNS (mDNS) enables DNS-like hostname resolution on a local network without requiring a conventional DNS server. It's designed for zero-configuration networking, where devices can discover each other automatically.
+
+### Key Concepts
+
+**Multicast Group**: mDNS uses IP multicast address 224.0.0.251 on UDP port 5353. All mDNS-enabled devices on the local network join this multicast group to send and receive DNS queries and responses.
+
+**Domain**: By default, mDNS uses the `.local` top-level domain. Hostnames like `myhost.local` are resolved via mDNS rather than traditional DNS servers.
+
+**DNS Record Types**: mDNS primarily uses standard DNS record types:
+- **A records**: Map hostnames to IPv4 addresses
+- **AAAA records**: Map hostnames to IPv6 addresses (not implemented in this library)
+
+### Protocol Operation
+
+**Announcements (Unsolicited Responses)**: When a device joins the network or periodically thereafter, it multicasts DNS response packets announcing its hostname and IP address. This allows other devices to learn about it without explicitly querying. Announcements are sent with the cache-flush bit set to indicate that receivers should update their cache.
+
+**Queries**: When a device wants to find a specific hostname, it sends a DNS query to the multicast group. All devices receive the query and check if it matches their hostname.
+
+**Responses**: If a device's hostname matches a received query, it responds with a DNS answer packet containing its IP address. Responses can be sent either via multicast (so all devices can update their caches) or via unicast (directly to the querier).
+
+**Cache Coherency**: mDNS records have TTL (Time To Live) values. Devices cache responses and use the TTL to determine when cached data expires. The cache-flush bit in responses signals that old cached data should be replaced.
+
+**Goodbye Packets**: When a device is about to leave the network gracefully, it sends a multicast announcement with TTL=0, signaling to other devices that they should remove its entry from their cache.
+
+### Implementation in This Library
 
 1. **Broadcasting**: The service periodically broadcasts your hostname and IP address to the mDNS multicast group (224.0.0.251:5353)
 2. **Listening**: Simultaneously listens for mDNS queries and announcements from other peers
