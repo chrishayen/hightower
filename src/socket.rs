@@ -20,7 +20,7 @@ pub fn create_recv_socket() -> io::Result<Socket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
 
     socket.set_reuse_address(true)?;
-    socket.set_nonblocking(false)?;
+    socket.set_nonblocking(true)?;
 
     // Bind to mDNS port
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), MDNS_PORT);

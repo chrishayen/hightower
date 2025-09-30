@@ -41,6 +41,10 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4A
                     }
                 }
             }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No data available, yield to other tasks
+                tokio::task::yield_now().await;
+            }
             Err(e) => {
                 log::error!("Failed to receive mDNS query: {}", e);
             }
