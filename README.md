@@ -8,6 +8,8 @@ A Rust implementation of mDNS (Multicast DNS) for advertising and discovering ho
 - Listen for and respond to mDNS queries from other peers
 - Query for specific hostnames
 - Configurable broadcast intervals
+- Configurable domain (defaults to `.local` per RFC 6762)
+- Host discovery callbacks
 - Async/await support with Tokio
 
 ## Installation
@@ -107,6 +109,24 @@ async fn main() -> std::io::Result<()> {
             println!("Processing: {}", hostname);
         }
     });
+
+    mdns.run().await;
+
+    Ok(())
+}
+```
+
+### Custom Domain
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    // Use a custom domain instead of .local
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
+        .with_domain("custom");
 
     mdns.run().await;
 
