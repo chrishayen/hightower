@@ -1,0 +1,102 @@
+# hightower-mdns
+
+A Rust implementation of mDNS (Multicast DNS) for advertising and discovering hostnames on a local network, following RFC 6762.
+
+## Features
+
+- Advertise a hostname on the local network with automatic periodic broadcasting
+- Listen for and respond to mDNS queries from other peers
+- Query for specific hostnames
+- Configurable broadcast intervals
+- Async/await support with Tokio
+
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+hightower-mdns = "0.1.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+```
+
+## Usage
+
+### Basic Example
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    // Create an mDNS instance with your hostname and local IP
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
+
+    // Run the mDNS service (broadcasts and listens for queries)
+    mdns.run().await;
+
+    Ok(())
+}
+```
+
+### Custom Broadcast Interval
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    // Broadcast every 60 seconds instead of the default 120 seconds
+    let mdns = Mdns::with_interval(
+        "myhost",
+        Ipv4Addr::new(192, 168, 1, 100),
+        Duration::from_secs(60)
+    )?;
+
+    mdns.run().await;
+
+    Ok(())
+}
+```
+
+### Querying for Hosts
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
+
+    // Query for another host on the network
+    mdns.query("otherhost").await;
+
+    // Run the service
+    mdns.run().await;
+
+    Ok(())
+}
+```
+
+## How It Works
+
+1. **Broadcasting**: The service periodically broadcasts your hostname and IP address to the mDNS multicast group (224.0.0.251:5353)
+2. **Listening**: Simultaneously listens for mDNS queries from other peers
+3. **Responding**: When a query is received for your hostname, automatically responds with your IP address
+4. **Querying**: Can send queries to discover other hosts on the network
+
+## RFC 6762 Compliance
+
+This implementation follows the mDNS specification defined in RFC 6762, including:
+- Default broadcast interval of 120 seconds
+- Multicast address 224.0.0.251 on port 5353
+- Proper DNS packet formatting
+- Query/response handling
+
+## License
+
+[Add your license here]
