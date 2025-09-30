@@ -9,25 +9,39 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 use socket2::Socket;
+use tokio::sync::mpsc;
 
 use socket::{create_send_socket, create_recv_socket};
 
-/// Callback function type for host discovery notifications
-pub type HostDiscoveryCallback = Arc<dyn Fn(String) + Send + Sync>;
+/// Handle for interacting with a running mDNS service
+pub struct MdnsHandle {
+    send_socket: Arc<Socket>,
+    domain: String,
+    /// Channel for receiving discovered host announcements
+    pub discoveries: mpsc::Receiver<String>,
+    /// Channel for receiving query responses
+    pub responses: mpsc::Receiver<String>,
+}
 
-/// Callback function type for query response notifications
-pub type QueryResponseCallback = Arc<dyn Fn(String) + Send + Sync>;
+impl MdnsHandle {
+    /// Send a query for a specific hostname
+    ///
+    /// # Arguments
+    ///
+    /// * `hostname` - The hostname to query (without domain suffix)
+    pub async fn query(&self, hostname: &str) {
+        query::query(&self.send_socket, hostname, &self.domain).await;
+    }
+}
 
 /// mDNS service for advertising a hostname on the local network
 pub struct Mdns {
     name: String,
     domain: String,
     broadcast_interval: Duration,
-    send_socket: Socket,
-    recv_socket: Socket,
+    send_socket: Arc<Socket>,
+    recv_socket: Arc<Socket>,
     local_ip: Ipv4Addr,
-    on_host_discovered: Option<HostDiscoveryCallback>,
-    on_query_response: Option<QueryResponseCallback>,
 }
 
 impl Mdns {
@@ -65,11 +79,9 @@ impl Mdns {
             name: name.into(),
             domain: "local".to_string(),
             broadcast_interval: interval,
-            send_socket,
-            recv_socket,
+            send_socket: Arc::new(send_socket),
+            recv_socket: Arc::new(recv_socket),
             local_ip: ip,
-            on_host_discovered: None,
-            on_query_response: None,
         })
     }
 
@@ -80,32 +92,6 @@ impl Mdns {
     /// * `domain` - The domain to use (without leading dot)
     pub fn with_domain<S: Into<String>>(mut self, domain: S) -> Self {
         self.domain = domain.into();
-        self
-    }
-
-    /// Set a callback to be invoked when a new host is discovered
-    ///
-    /// # Arguments
-    ///
-    /// * `callback` - Function to call with the hostname when discovered
-    pub fn on_host_discovered<F>(mut self, callback: F) -> Self
-    where
-        F: Fn(String) + Send + Sync + 'static,
-    {
-        self.on_host_discovered = Some(Arc::new(callback));
-        self
-    }
-
-    /// Set a callback to be invoked when a query response is received
-    ///
-    /// # Arguments
-    ///
-    /// * `callback` - Function to call with the hostname when a response is received
-    pub fn on_query_response<F>(mut self, callback: F) -> Self
-    where
-        F: Fn(String) + Send + Sync + 'static,
-    {
-        self.on_query_response = Some(Arc::new(callback));
         self
     }
 
@@ -123,26 +109,45 @@ impl Mdns {
     ///
     /// This will continuously broadcast the mDNS name at the configured interval
     /// and listen for queries from other peers.
-    /// The loop runs until cancelled.
-    pub async fn run(&self) {
-        tokio::join!(
-            broadcast::broadcast_loop(&self.send_socket, &self.name, &self.domain, self.local_ip, self.broadcast_interval),
-            query::listen(&self.recv_socket, &self.send_socket, &self.name, &self.domain, self.local_ip, self.on_host_discovered.clone(), self.on_query_response.clone())
-        );
+    /// Returns an MdnsHandle for querying and receiving discovery notifications.
+    pub fn run(self) -> MdnsHandle {
+        let (disc_tx, disc_rx) = mpsc::channel(100);
+        let (resp_tx, resp_rx) = mpsc::channel(100);
+
+        let send_socket = self.send_socket.clone();
+        let recv_socket = self.recv_socket.clone();
+        let name = Arc::new(self.name);
+        let domain = Arc::new(self.domain.clone());
+        let local_ip = self.local_ip;
+        let broadcast_interval = self.broadcast_interval;
+
+        // Spawn broadcast task
+        let send_socket_clone = send_socket.clone();
+        let name_clone = name.clone();
+        let domain_clone = domain.clone();
+        tokio::spawn(async move {
+            broadcast::broadcast_loop(&send_socket_clone, &name_clone, &domain_clone, local_ip, broadcast_interval).await;
+        });
+
+        // Spawn listen task
+        let send_socket_clone = send_socket.clone();
+        let name_clone = name.clone();
+        let domain_clone = domain.clone();
+        tokio::spawn(async move {
+            query::listen(&recv_socket, &send_socket_clone, &name_clone, &domain_clone, local_ip, disc_tx, resp_tx).await;
+        });
+
+        MdnsHandle {
+            send_socket,
+            domain: self.domain,
+            discoveries: disc_rx,
+            responses: resp_rx,
+        }
     }
 
     /// Get the local IP address being advertised
     pub fn local_ip(&self) -> Ipv4Addr {
         self.local_ip
-    }
-
-    /// Send a query for a specific hostname
-    ///
-    /// # Arguments
-    ///
-    /// * `hostname` - The hostname to query (without domain suffix)
-    pub async fn query(&self, hostname: &str) {
-        query::query(&self.send_socket, hostname, &self.domain).await;
     }
 
     /// Send a goodbye packet to notify others this host is leaving
@@ -151,23 +156,6 @@ impl Mdns {
     /// hostname from their cache.
     pub async fn goodbye(&self) {
         broadcast::send_goodbye(&self.send_socket, &self.name, &self.domain, self.local_ip).await;
-    }
-}
-
-impl Drop for Mdns {
-    fn drop(&mut self) {
-        // Send goodbye packet synchronously on drop
-        let packet = packet::build_goodbye_packet(&self.name, &self.domain, self.local_ip);
-        let addr = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(constants::MDNS_MULTICAST_ADDR),
-            constants::MDNS_PORT
-        );
-
-        if let Err(e) = self.send_socket.send_to(&packet, &addr.into()) {
-            log::warn!("Failed to send goodbye packet on drop: {}", e);
-        } else {
-            log::info!("Sent goodbye packet for {}.{} on drop", self.name, self.domain);
-        }
     }
 }
 

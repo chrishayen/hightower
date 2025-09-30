@@ -9,8 +9,7 @@ A naive Rust implementation of mDNS (Multicast DNS) for advertising and discover
 - Query for specific hostnames
 - Configurable broadcast intervals
 - Configurable domain (defaults to `.local` per RFC 6762)
-- Host discovery callbacks
-- Query response callbacks
+- Channel-based API for receiving discoveries and query responses
 - Async/await support with Tokio
 
 ## Installation
@@ -37,35 +36,24 @@ async fn main() -> std::io::Result<()> {
     let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
 
     // Run the mDNS service (broadcasts and listens for queries)
-    mdns.run().await;
+    // Returns a handle for querying and receiving notifications
+    let mut handle = mdns.run();
 
-    Ok(())
+    // Handle incoming discoveries and responses
+    loop {
+        tokio::select! {
+            Some(hostname) = handle.discoveries.recv() => {
+                println!("Discovered: {}", hostname);
+            }
+            Some(hostname) = handle.responses.recv() => {
+                println!("Query response: {}", hostname);
+            }
+        }
+    }
 }
 ```
 
-### Custom Broadcast Interval
-
-```rust
-use hightower_mdns::Mdns;
-use std::net::Ipv4Addr;
-use std::time::Duration;
-
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    // Broadcast every 60 seconds instead of the default 120 seconds
-    let mdns = Mdns::with_interval(
-        "myhost",
-        Ipv4Addr::new(192, 168, 1, 100),
-        Duration::from_secs(60)
-    )?;
-
-    mdns.run().await;
-
-    Ok(())
-}
-```
-
-### Discovering Hosts
+### Querying for Hosts
 
 ```rust
 use hightower_mdns::Mdns;
@@ -73,42 +61,46 @@ use std::net::Ipv4Addr;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
-        .on_host_discovered(|hostname| {
-            println!("Discovered: {}", hostname);
-            // Query for more information or handle discovery
-        });
-
-    // Run the service (will call callback when hosts broadcast)
-    mdns.run().await;
-
-    Ok(())
-}
-```
-
-### Querying for Specific Hosts
-
-```rust
-use hightower_mdns::Mdns;
-use std::net::Ipv4Addr;
-
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
-        .on_query_response(|hostname| {
-            println!("Query response from: {}", hostname);
-        });
-
-    // Start the mDNS service in a separate task
-    let mdns_clone = &mdns;
-    tokio::spawn(async move {
-        mdns_clone.run().await;
-    });
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
+    let mut handle = mdns.run();
 
     // Query for a specific host
-    mdns.query("otherhost").await;
+    handle.query("otherhost").await;
+
+    // Wait for response
+    if let Some(hostname) = handle.responses.recv().await {
+        println!("Found: {}", hostname);
+    }
 
     Ok(())
+}
+```
+
+### Query on Discovery
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
+    let mut handle = mdns.run();
+
+    loop {
+        tokio::select! {
+            Some(hostname) = handle.discoveries.recv() => {
+                println!("Discovered: {}", hostname);
+
+                // Query the discovered host
+                let host = hostname.split('.').next().unwrap_or(&hostname);
+                handle.query(host).await;
+            }
+            Some(hostname) = handle.responses.recv() => {
+                println!("Query response from: {}", hostname);
+            }
+        }
+    }
 }
 ```
 
@@ -124,7 +116,10 @@ async fn main() -> std::io::Result<()> {
     let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
         .with_domain("custom");
 
-    mdns.run().await;
+    let _handle = mdns.run();
+
+    // Service is now running in the background
+    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
 
     Ok(())
 }
@@ -143,8 +138,6 @@ async fn main() -> std::io::Result<()> {
     // Manually send goodbye packet before leaving
     mdns.goodbye().await;
 
-    // Note: Goodbye packet is also automatically sent when Mdns is dropped
-
     Ok(())
 }
 ```
@@ -154,8 +147,8 @@ async fn main() -> std::io::Result<()> {
 1. **Broadcasting**: The service periodically broadcasts your hostname and IP address to the mDNS multicast group (224.0.0.251:5353)
 2. **Listening**: Simultaneously listens for mDNS queries and announcements from other peers
 3. **Responding**: When a query is received for your hostname, automatically responds with your IP address
-4. **Discovery**: When broadcasts from other hosts are received, invokes the callback with their hostname
-5. **Querying**: Can send queries to discover specific hosts on the network
+4. **Discovery**: When broadcasts from other hosts are received, sends them to the `discoveries` channel
+5. **Querying**: Can send queries to discover specific hosts, responses arrive on the `responses` channel
 
 ## RFC 6762 Implementation Status
 
