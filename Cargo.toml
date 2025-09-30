@@ -1,6 +1,6 @@
 [package]
 name = "hightower-mdns"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Chris Hayen"]
 description = "A naive Rust implementation of mDNS (Multicast DNS) for advertising and discovering hostnames on a local network"
