@@ -125,8 +125,8 @@ pub fn parse_mdns_query(packet: &[u8]) -> Option<String> {
     }
 }
 
-/// Parse an mDNS response/announcement packet and extract hostname
-pub fn parse_mdns_response(packet: &[u8]) -> Option<String> {
+/// Parse an mDNS response/announcement packet and extract hostname and IP address
+pub fn parse_mdns_response(packet: &[u8]) -> Option<(String, Ipv4Addr)> {
     if packet.len() < 12 {
         return None;
     }
@@ -186,10 +186,12 @@ pub fn parse_mdns_response(packet: &[u8]) -> Option<String> {
                 }
                 offset_pos += offset_len;
             }
+            pos += 2; // Skip the compression pointer
             break;
         }
 
         if len == 0 {
+            pos += 1; // Skip the null terminator
             break;
         }
 
@@ -208,10 +210,41 @@ pub fn parse_mdns_response(packet: &[u8]) -> Option<String> {
     }
 
     if name_parts.is_empty() {
-        None
-    } else {
-        Some(name_parts.join("."))
+        return None;
     }
+
+    // Now we're at the TYPE field
+    if pos + 10 > packet.len() {
+        return None;
+    }
+
+    // Read TYPE
+    let rtype = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
+    pos += 2;
+
+    // Read CLASS
+    pos += 2;
+
+    // Read TTL
+    pos += 4;
+
+    // Read RDLENGTH
+    let rdlength = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
+    pos += 2;
+
+    // Check if it's an A record and has correct length
+    if rtype != 1 || rdlength != 4 {
+        return None;
+    }
+
+    // Read the IP address
+    if pos + 4 > packet.len() {
+        return None;
+    }
+
+    let ip = Ipv4Addr::new(packet[pos], packet[pos + 1], packet[pos + 2], packet[pos + 3]);
+
+    Some((name_parts.join("."), ip))
 }
 
 #[cfg(test)]

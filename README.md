@@ -42,11 +42,11 @@ async fn main() -> std::io::Result<()> {
     // Handle incoming discoveries and responses
     loop {
         tokio::select! {
-            Some(hostname) = handle.discoveries.recv() => {
-                println!("Discovered: {}", hostname);
+            Some(response) = handle.discoveries.recv() => {
+                println!("Discovered: {} at {}", response.hostname, response.ip);
             }
-            Some(hostname) = handle.responses.recv() => {
-                println!("Query response: {}", hostname);
+            Some(response) = handle.responses.recv() => {
+                println!("Query response: {} at {}", response.hostname, response.ip);
             }
         }
     }
@@ -68,8 +68,8 @@ async fn main() -> std::io::Result<()> {
     handle.query("otherhost").await;
 
     // Wait for response
-    if let Some(hostname) = handle.responses.recv().await {
-        println!("Found: {}", hostname);
+    if let Some(response) = handle.responses.recv().await {
+        println!("Found: {} at {}", response.hostname, response.ip);
     }
 
     Ok(())
@@ -89,15 +89,15 @@ async fn main() -> std::io::Result<()> {
 
     loop {
         tokio::select! {
-            Some(hostname) = handle.discoveries.recv() => {
-                println!("Discovered: {}", hostname);
+            Some(response) = handle.discoveries.recv() => {
+                println!("Discovered: {} at {}", response.hostname, response.ip);
 
                 // Query the discovered host
-                let host = hostname.split('.').next().unwrap_or(&hostname);
+                let host = response.hostname.split('.').next().unwrap_or(&response.hostname);
                 handle.query(host).await;
             }
-            Some(hostname) = handle.responses.recv() => {
-                println!("Query response from: {}", hostname);
+            Some(response) = handle.responses.recv() => {
+                println!("Query response from: {} at {}", response.hostname, response.ip);
             }
         }
     }

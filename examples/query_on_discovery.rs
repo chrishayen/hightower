@@ -16,16 +16,16 @@ async fn main() -> std::io::Result<()> {
 
     loop {
         tokio::select! {
-            Some(hostname) = handle.discoveries.recv() => {
-                println!("Discovered host via broadcast: {}", hostname);
+            Some(response) = handle.discoveries.recv() => {
+                println!("Discovered host via broadcast: {} at {}", response.hostname, response.ip);
 
                 // Extract hostname without domain for query
-                let host = hostname.split('.').next().unwrap_or(&hostname);
+                let host = response.hostname.split('.').next().unwrap_or(&response.hostname);
                 println!("Sending query to: {}", host);
                 handle.query(host).await;
             }
-            Some(hostname) = handle.responses.recv() => {
-                println!("Got query response from: {}", hostname);
+            Some(response) = handle.responses.recv() => {
+                println!("Got query response from: {} at {}", response.hostname, response.ip);
             }
         }
     }

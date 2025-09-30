@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
 use crate::packet::{build_mdns_packet, build_mdns_query, parse_mdns_query, parse_mdns_response};
+use crate::MdnsResponse;
 
 /// Send a query for a specific hostname
 ///
@@ -24,7 +25,7 @@ pub async fn query(socket: &Socket, hostname: &str, domain: &str) {
 }
 
 /// Listen for and respond to mDNS queries
-pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, discoveries: mpsc::Sender<String>, responses: mpsc::Sender<String>) {
+pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, discoveries: mpsc::Sender<MdnsResponse>, responses: mpsc::Sender<MdnsResponse>) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 
     loop {
@@ -45,14 +46,19 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &
                 }
 
                 // Check for responses/announcements
-                if let Some(hostname) = parse_mdns_response(data) {
+                if let Some((hostname, response_ip)) = parse_mdns_response(data) {
                     let expected_name = format!("{}.{}", name, domain);
                     if hostname != expected_name {
-                        log::info!("Discovered host: {}", hostname);
+                        log::info!("Discovered host: {} at {}", hostname, response_ip);
+
+                        let response = MdnsResponse {
+                            hostname: hostname.clone(),
+                            ip: response_ip,
+                        };
 
                         // Send to both channels
-                        let _ = discoveries.send(hostname.clone()).await;
-                        let _ = responses.send(hostname).await;
+                        let _ = discoveries.send(response.clone()).await;
+                        let _ = responses.send(response).await;
                     }
                 }
             }

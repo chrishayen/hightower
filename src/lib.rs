@@ -13,14 +13,23 @@ use tokio::sync::mpsc;
 
 use socket::{create_send_socket, create_recv_socket};
 
+/// Response from an mDNS query or discovery
+#[derive(Debug, Clone, PartialEq)]
+pub struct MdnsResponse {
+    /// The hostname (e.g., "myhost.local")
+    pub hostname: String,
+    /// The IPv4 address
+    pub ip: Ipv4Addr,
+}
+
 /// Handle for interacting with a running mDNS service
 pub struct MdnsHandle {
     send_socket: Arc<Socket>,
     domain: String,
     /// Channel for receiving discovered host announcements
-    pub discoveries: mpsc::Receiver<String>,
+    pub discoveries: mpsc::Receiver<MdnsResponse>,
     /// Channel for receiving query responses
-    pub responses: mpsc::Receiver<String>,
+    pub responses: mpsc::Receiver<MdnsResponse>,
 }
 
 impl MdnsHandle {
