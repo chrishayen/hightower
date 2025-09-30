@@ -15,8 +15,9 @@ pub async fn query(socket: &Socket, hostname: &str) {
     let packet = build_mdns_query(hostname);
     let addr = SocketAddr::new(IpAddr::V4(MDNS_MULTICAST_ADDR), MDNS_PORT);
 
-    if let Err(e) = socket.send_to(&packet, &addr.into()) {
-        eprintln!("Failed to send mDNS query: {}", e);
+    match socket.send_to(&packet, &addr.into()) {
+        Ok(_) => log::debug!("Sent query for {}.local", hostname),
+        Err(e) => log::error!("Failed to send mDNS query: {}", e),
     }
 }
 
@@ -35,13 +36,13 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4A
                 if let Some(query_name) = parse_mdns_query(data) {
                     let expected_name = format!("{}.local", name);
                     if query_name == expected_name {
-                        println!("Received query for {}.local, sending response", name);
+                        log::debug!("Received query for {}.local, sending response", name);
                         respond_to_query(send_socket, name, ip).await;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to receive mDNS query: {}", e);
+                log::error!("Failed to receive mDNS query: {}", e);
             }
         }
     }
@@ -52,7 +53,8 @@ async fn respond_to_query(socket: &Socket, name: &str, ip: Ipv4Addr) {
     let packet = build_mdns_packet(name, ip);
     let addr = SocketAddr::new(IpAddr::V4(MDNS_MULTICAST_ADDR), MDNS_PORT);
 
-    if let Err(e) = socket.send_to(&packet, &addr.into()) {
-        eprintln!("Failed to send mDNS response: {}", e);
+    match socket.send_to(&packet, &addr.into()) {
+        Ok(_) => log::debug!("Sent response for {}.local", name),
+        Err(e) => log::error!("Failed to send mDNS response: {}", e),
     }
 }

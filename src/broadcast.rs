@@ -22,7 +22,8 @@ async fn broadcast(socket: &Socket, name: &str, ip: Ipv4Addr) {
     let packet = build_mdns_packet(name, ip);
     let addr = SocketAddr::new(IpAddr::V4(MDNS_MULTICAST_ADDR), MDNS_PORT);
 
-    if let Err(e) = socket.send_to(&packet, &addr.into()) {
-        eprintln!("Failed to send mDNS packet: {}", e);
+    match socket.send_to(&packet, &addr.into()) {
+        Ok(_) => log::debug!("Broadcasted mDNS announcement for {}.local", name),
+        Err(e) => log::error!("Failed to send mDNS packet: {}", e),
     }
 }

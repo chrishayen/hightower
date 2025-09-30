@@ -6,6 +6,7 @@ use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 {
@@ -40,7 +41,6 @@ async fn main() {
             loop {
                 sleep(Duration::from_secs(3)).await;
                 mdns2.query(&query).await;
-                println!("Sent query for {}.local", query);
             }
         });
     }
