@@ -201,6 +201,3 @@ Multicast DNS (mDNS) enables DNS-like hostname resolution on a local network wit
 - Truncation handling
 - DNS compression pointer handling in queries
 
-## License
-
-[Add your license here]
