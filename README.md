@@ -93,29 +93,21 @@ use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mdns = Arc::new(Mutex::new(
-        Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
-    ));
+    let discovered_hosts = Arc::new(Mutex::new(Vec::new()));
+    let discovered_clone = discovered_hosts.clone();
 
-    let mdns_clone = mdns.clone();
-    let mdns_instance = mdns.lock().await;
-    let mdns_with_callback = std::mem::replace(
-        &mut *mdns.lock().await,
-        mdns_instance
-    ).on_host_discovered(move |hostname| {
-        println!("Discovered: {}", hostname);
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
+        .on_host_discovered(move |hostname| {
+            println!("Discovered: {}", hostname);
 
-        // Query the discovered host for more information
-        let mdns = mdns_clone.clone();
-        tokio::spawn(async move {
-            let mdns = mdns.lock().await;
-            // Strip .local suffix if present
-            let query_name = hostname.strip_suffix(".local").unwrap_or(&hostname);
-            mdns.query(query_name).await;
+            // Store discovered host for later processing
+            let hosts = discovered_clone.clone();
+            tokio::spawn(async move {
+                hosts.lock().await.push(hostname);
+            });
         });
-    });
 
-    mdns_with_callback.run().await;
+    mdns.run().await;
 
     Ok(())
 }
