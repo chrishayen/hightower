@@ -2,6 +2,16 @@ use std::net::Ipv4Addr;
 
 /// Build a simple mDNS A record response packet
 pub fn build_mdns_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
+    build_mdns_packet_with_ttl(name, domain, ip, 120)
+}
+
+/// Build a goodbye packet (TTL = 0)
+pub fn build_goodbye_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
+    build_mdns_packet_with_ttl(name, domain, ip, 0)
+}
+
+/// Build an mDNS A record response packet with custom TTL
+fn build_mdns_packet_with_ttl(name: &str, domain: &str, ip: Ipv4Addr, ttl: u32) -> Vec<u8> {
     let mut packet = Vec::new();
 
     // DNS Header (12 bytes)
@@ -26,8 +36,8 @@ pub fn build_mdns_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
     // CLASS: IN with cache-flush bit (0x8001)
     packet.extend_from_slice(&[0x80, 0x01]);
 
-    // TTL: 120 seconds
-    packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x78]);
+    // TTL: specified seconds
+    packet.extend_from_slice(&ttl.to_be_bytes());
 
     // RDLENGTH: 4 (for IPv4 address)
     packet.extend_from_slice(&[0x00, 0x04]);
@@ -276,5 +286,36 @@ mod tests {
 
         // Verify it contains the name
         assert!(packet.len() > 12);
+    }
+
+    #[test]
+    fn test_build_goodbye_packet() {
+        let ip = Ipv4Addr::new(192, 168, 1, 50);
+        let packet = build_goodbye_packet("testhost", "local", ip);
+
+        // Verify header
+        assert_eq!(packet[2], 0x84); // Response flag
+        assert_eq!(packet[7], 0x01); // 1 answer
+
+        // Find TTL position (after name encoding)
+        // Name is "testhost.local":
+        //   1 byte length (8) + 8 bytes "testhost"
+        //   1 byte length (5) + 5 bytes "local"
+        //   1 byte null = 16 bytes total
+        // After header (12 bytes) + name (16 bytes) + TYPE (2) + CLASS (2) = 32 bytes
+        // TTL starts at position 32
+        let ttl_pos = 32;
+        let ttl = u32::from_be_bytes([
+            packet[ttl_pos],
+            packet[ttl_pos + 1],
+            packet[ttl_pos + 2],
+            packet[ttl_pos + 3],
+        ]);
+        assert_eq!(ttl, 0); // TTL should be 0 for goodbye packet
+
+        // Verify IP address is still in the packet
+        let ip_octets = ip.octets();
+        let packet_len = packet.len();
+        assert_eq!(&packet[packet_len - 4..], &ip_octets);
     }
 }

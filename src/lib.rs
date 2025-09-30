@@ -126,6 +126,31 @@ impl Mdns {
     pub async fn query(&self, hostname: &str) {
         query::query(&self.send_socket, hostname, &self.domain).await;
     }
+
+    /// Send a goodbye packet to notify others this host is leaving
+    ///
+    /// This sends a packet with TTL=0 to tell other hosts to remove this
+    /// hostname from their cache.
+    pub async fn goodbye(&self) {
+        broadcast::send_goodbye(&self.send_socket, &self.name, &self.domain, self.local_ip).await;
+    }
+}
+
+impl Drop for Mdns {
+    fn drop(&mut self) {
+        // Send goodbye packet synchronously on drop
+        let packet = packet::build_goodbye_packet(&self.name, &self.domain, self.local_ip);
+        let addr = std::net::SocketAddr::new(
+            std::net::IpAddr::V4(constants::MDNS_MULTICAST_ADDR),
+            constants::MDNS_PORT
+        );
+
+        if let Err(e) = self.send_socket.send_to(&packet, &addr.into()) {
+            log::warn!("Failed to send goodbye packet on drop: {}", e);
+        } else {
+            log::info!("Sent goodbye packet for {}.{} on drop", self.name, self.domain);
+        }
+    }
 }
 
 #[cfg(test)]

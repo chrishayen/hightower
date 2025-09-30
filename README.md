@@ -134,6 +134,25 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
+### Goodbye Packets
+
+```rust
+use hightower_mdns::Mdns;
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?;
+
+    // Manually send goodbye packet before leaving
+    mdns.goodbye().await;
+
+    // Note: Goodbye packet is also automatically sent when Mdns is dropped
+
+    Ok(())
+}
+```
+
 ## How It Works
 
 1. **Broadcasting**: The service periodically broadcasts your hostname and IP address to the mDNS multicast group (224.0.0.251:5353)
@@ -152,11 +171,11 @@ async fn main() -> std::io::Result<()> {
 - Multicast address 224.0.0.251 on port 5353
 - Default broadcast interval of 120 seconds
 - Cache-flush bit in responses
+- Goodbye packets (TTL=0) when leaving the network
 
 ### Not Implemented
 - Probing (Section 8.1) - name conflict detection before claiming
 - Conflict resolution
-- Goodbye packets when leaving the network
 - Known-Answer Suppression
 - Negative responses
 - IPv6 support (AAAA records)
