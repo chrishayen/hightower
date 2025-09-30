@@ -18,6 +18,7 @@ pub type HostDiscoveryCallback = Arc<dyn Fn(String) + Send + Sync>;
 /// mDNS service for advertising a hostname on the local network
 pub struct Mdns {
     name: String,
+    domain: String,
     broadcast_interval: Duration,
     send_socket: Socket,
     recv_socket: Socket,
@@ -49,7 +50,7 @@ impl Mdns {
     ///
     /// # Arguments
     ///
-    /// * `name` - The mDNS name to advertise (without .local suffix)
+    /// * `name` - The mDNS name to advertise (without domain suffix)
     /// * `ip` - The local IPv4 address to advertise
     /// * `interval` - Time between broadcasts (default is 120 seconds per RFC 6762)
     pub fn with_interval<S: Into<String>>(name: S, ip: Ipv4Addr, interval: Duration) -> io::Result<Self> {
@@ -58,12 +59,23 @@ impl Mdns {
 
         Ok(Self {
             name: name.into(),
+            domain: "local".to_string(),
             broadcast_interval: interval,
             send_socket,
             recv_socket,
             local_ip: ip,
             on_host_discovered: None,
         })
+    }
+
+    /// Set a custom domain (default is "local")
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - The domain to use (without leading dot)
+    pub fn with_domain<S: Into<String>>(mut self, domain: S) -> Self {
+        self.domain = domain.into();
+        self
     }
 
     /// Set a callback to be invoked when a new host is discovered
@@ -96,8 +108,8 @@ impl Mdns {
     /// The loop runs until cancelled.
     pub async fn run(&self) {
         tokio::join!(
-            broadcast::broadcast_loop(&self.send_socket, &self.name, self.local_ip, self.broadcast_interval),
-            query::listen(&self.recv_socket, &self.send_socket, &self.name, self.local_ip, self.on_host_discovered.clone())
+            broadcast::broadcast_loop(&self.send_socket, &self.name, &self.domain, self.local_ip, self.broadcast_interval),
+            query::listen(&self.recv_socket, &self.send_socket, &self.name, &self.domain, self.local_ip, self.on_host_discovered.clone())
         );
     }
 
@@ -110,9 +122,9 @@ impl Mdns {
     ///
     /// # Arguments
     ///
-    /// * `hostname` - The hostname to query (without .local suffix)
+    /// * `hostname` - The hostname to query (without domain suffix)
     pub async fn query(&self, hostname: &str) {
-        query::query(&self.send_socket, hostname).await;
+        query::query(&self.send_socket, hostname, &self.domain).await;
     }
 }
 

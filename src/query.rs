@@ -11,19 +11,20 @@ use crate::HostDiscoveryCallback;
 /// # Arguments
 ///
 /// * `socket` - The socket to send the query on
-/// * `hostname` - The hostname to query (without .local suffix)
-pub async fn query(socket: &Socket, hostname: &str) {
-    let packet = build_mdns_query(hostname);
+/// * `hostname` - The hostname to query (without domain suffix)
+/// * `domain` - The domain to use
+pub async fn query(socket: &Socket, hostname: &str, domain: &str) {
+    let packet = build_mdns_query(hostname, domain);
     let addr = SocketAddr::new(IpAddr::V4(MDNS_MULTICAST_ADDR), MDNS_PORT);
 
     match socket.send_to(&packet, &addr.into()) {
-        Ok(_) => log::debug!("Sent query for {}.local", hostname),
+        Ok(_) => log::debug!("Sent query for {}.{}", hostname, domain),
         Err(e) => log::error!("Failed to send mDNS query: {}", e),
     }
 }
 
 /// Listen for and respond to mDNS queries
-pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4Addr, on_host_discovered: Option<HostDiscoveryCallback>) {
+pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, on_host_discovered: Option<HostDiscoveryCallback>) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 
     loop {
@@ -36,16 +37,16 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4A
 
                 // Check for queries
                 if let Some(query_name) = parse_mdns_query(data) {
-                    let expected_name = format!("{}.local", name);
+                    let expected_name = format!("{}.{}", name, domain);
                     if query_name == expected_name {
-                        log::debug!("Received query for {}.local, sending response", name);
-                        respond_to_query(send_socket, name, ip).await;
+                        log::debug!("Received query for {}.{}, sending response", name, domain);
+                        respond_to_query(send_socket, name, domain, ip).await;
                     }
                 }
 
                 // Check for responses/announcements
                 if let Some(hostname) = parse_mdns_response(data) {
-                    let expected_name = format!("{}.local", name);
+                    let expected_name = format!("{}.{}", name, domain);
                     if hostname != expected_name {
                         log::info!("Discovered host: {}", hostname);
                         if let Some(ref callback) = on_host_discovered {
@@ -66,12 +67,12 @@ pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, ip: Ipv4A
 }
 
 /// Send a response to an mDNS query
-async fn respond_to_query(socket: &Socket, name: &str, ip: Ipv4Addr) {
-    let packet = build_mdns_packet(name, ip);
+async fn respond_to_query(socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr) {
+    let packet = build_mdns_packet(name, domain, ip);
     let addr = SocketAddr::new(IpAddr::V4(MDNS_MULTICAST_ADDR), MDNS_PORT);
 
     match socket.send_to(&packet, &addr.into()) {
-        Ok(_) => log::debug!("Sent response for {}.local", name),
+        Ok(_) => log::debug!("Sent response for {}.{}", name, domain),
         Err(e) => log::error!("Failed to send mDNS response: {}", e),
     }
 }

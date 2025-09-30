@@ -88,24 +88,25 @@ async fn main() -> std::io::Result<()> {
 ```rust
 use hightower_mdns::Mdns;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let discovered_hosts = Arc::new(Mutex::new(Vec::new()));
-    let discovered_clone = discovered_hosts.clone();
+    let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100))?
         .on_host_discovered(move |hostname| {
             println!("Discovered: {}", hostname);
-
-            // Store discovered host for later processing
-            let hosts = discovered_clone.clone();
-            tokio::spawn(async move {
-                hosts.lock().await.push(hostname);
-            });
+            let _ = tx.send(hostname);
         });
+
+    // Spawn a task to handle discovered hosts
+    tokio::spawn(async move {
+        while let Some(hostname) = rx.recv().await {
+            // Process discovered host (query, store, etc.)
+            println!("Processing: {}", hostname);
+        }
+    });
 
     mdns.run().await;
 

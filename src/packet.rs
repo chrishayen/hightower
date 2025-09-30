@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 /// Build a simple mDNS A record response packet
-pub fn build_mdns_packet(name: &str, ip: Ipv4Addr) -> Vec<u8> {
+pub fn build_mdns_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
     let mut packet = Vec::new();
 
     // DNS Header (12 bytes)
@@ -13,7 +13,7 @@ pub fn build_mdns_packet(name: &str, ip: Ipv4Addr) -> Vec<u8> {
     packet.extend_from_slice(&[0x00, 0x00]); // Additional RRs: 0
 
     // QNAME: encode the hostname
-    let full_name = format!("{}.local", name);
+    let full_name = format!("{}.{}", name, domain);
     for label in full_name.split('.') {
         packet.push(label.len() as u8);
         packet.extend_from_slice(label.as_bytes());
@@ -39,7 +39,7 @@ pub fn build_mdns_packet(name: &str, ip: Ipv4Addr) -> Vec<u8> {
 }
 
 /// Build an mDNS query packet
-pub fn build_mdns_query(name: &str) -> Vec<u8> {
+pub fn build_mdns_query(name: &str, domain: &str) -> Vec<u8> {
     let mut packet = Vec::new();
 
     // DNS Header (12 bytes)
@@ -51,7 +51,7 @@ pub fn build_mdns_query(name: &str) -> Vec<u8> {
     packet.extend_from_slice(&[0x00, 0x00]); // Additional RRs: 0
 
     // QNAME: encode the hostname
-    let full_name = format!("{}.local", name);
+    let full_name = format!("{}.{}", name, domain);
     for label in full_name.split('.') {
         packet.push(label.len() as u8);
         packet.extend_from_slice(label.as_bytes());
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn test_build_mdns_packet() {
         let ip = Ipv4Addr::new(192, 168, 1, 50);
-        let packet = build_mdns_packet("testhost", ip);
+        let packet = build_mdns_packet("testhost", "local", ip);
 
         // Verify header
         assert_eq!(packet[2], 0x84); // Response flag
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_build_mdns_query() {
-        let packet = build_mdns_query("testhost");
+        let packet = build_mdns_query("testhost", "local");
 
         // Verify header
         assert_eq!(packet[2], 0x00); // Query flag
