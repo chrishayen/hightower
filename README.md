@@ -1,6 +1,6 @@
 # hightower-mdns
 
-A Rust implementation of mDNS (Multicast DNS) for advertising and discovering hostnames on a local network, following RFC 6762.
+A naive Rust implementation of mDNS (Multicast DNS) for advertising and discovering hostnames on a local network. Implements basic functionality from RFC 6762.
 
 ## Features
 
@@ -142,13 +142,28 @@ async fn main() -> std::io::Result<()> {
 4. **Discovery**: When broadcasts from other hosts are received, invokes the callback with their hostname
 5. **Querying**: Can send queries to discover specific hosts on the network
 
-## RFC 6762 Compliance
+## RFC 6762 Implementation Status
 
-This implementation follows the mDNS specification defined in RFC 6762, including:
-- Default broadcast interval of 120 seconds
+### Implemented
+- Periodic announcements/broadcasts
+- Query and response handling
+- A record (IPv4) support
+- DNS packet formatting
 - Multicast address 224.0.0.251 on port 5353
-- Proper DNS packet formatting
-- Query/response handling
+- Default broadcast interval of 120 seconds
+- Cache-flush bit in responses
+
+### Not Implemented
+- Probing (Section 8.1) - name conflict detection before claiming
+- Conflict resolution
+- Goodbye packets when leaving the network
+- Known-Answer Suppression
+- Negative responses
+- IPv6 support (AAAA records)
+- TTL-based cache management
+- Multiple questions/answers per packet
+- Truncation handling
+- DNS compression pointer handling in queries
 
 ## License
 
