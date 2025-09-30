@@ -9,6 +9,11 @@ repository = "https://github.com/chrishayen/hightower-mdns"
 readme = "README.md"
 keywords = ["mdns", "multicast", "dns", "networking", "discovery"]
 categories = ["network-programming", "asynchronous"]
+exclude = [
+  "CLAUDE.md",
+  "rfc6762.txt",
+  ".gitignore",
+]
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros", "net"] }
