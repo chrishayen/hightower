@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-mdns = "0.2"
+hightower-mdns = "0.1.2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 ```
 
