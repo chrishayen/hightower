@@ -9,6 +9,12 @@ repository = "https://github.com/chrishayen/hightower-wireguard"
 keywords = ["wireguard", "vpn", "networking", "cryptography"]
 categories = ["network-programming", "cryptography"]
 readme = "README.md"
+exclude = [
+    ".git",
+    ".gitignore",
+    "target",
+    "wireguard.pdf",
+]
 
 [dependencies]
 # Cryptographic primitives
