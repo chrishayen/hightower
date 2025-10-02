@@ -15,13 +15,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let engine = SingleNodeEngine::with_config(config)?;
 
-    // Submit a few writes. `SingleNodeEngine::put` assigns versions automatically.
+    // Submit writes. `SingleNodeEngine::put` assigns versions automatically.
     engine.put(b"alpha".to_vec(), b"bravo".to_vec())?;
     engine.put(b"charlie".to_vec(), b"delta".to_vec())?;
 
     // Reads go through the `KvEngine` trait.
-    let value = engine.get(b"alpha")?.expect("value should exist");
-    println!("alpha => {}", String::from_utf8_lossy(&value));
+    let alpha = engine.get(b"alpha")?.expect("alpha should exist");
+    println!("alpha => {}", String::from_utf8_lossy(&alpha));
+
+    // Update an existing value with a newer version.
+    engine.put(b"alpha".to_vec(), b"echo".to_vec())?;
+    let alpha_updated = engine.get(b"alpha")?.expect("alpha should still exist");
+    println!(
+        "alpha (after update) => {}",
+        String::from_utf8_lossy(&alpha_updated)
+    );
 
     // Deleting keys simply enqueues a tombstone entry.
     engine.delete(b"charlie".to_vec())?;

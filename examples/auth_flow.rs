@@ -18,21 +18,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     let auth = AuthService::new(engine, hasher, encryptor);
 
     // Create a user with an optional metadata blob.
-    let user = auth
-        .create_user_with_metadata(
-            "captain",
-            "it-doesnt-take-much",
-            Some(b"{\"role\":\"ops\"}".as_slice()),
-        )?
-        .user_id;
-    println!("created user {user}");
+    let user_record = auth.create_user_with_metadata(
+        "captain",
+        "it-doesnt-take-much",
+        Some(b"{\"role\":\"ops\"}".as_slice()),
+    )?;
+    println!("created user {}", user_record.user_id);
 
     // Verify the password in the happy path and for a typo.
     assert!(auth.verify_password("captain", "it-doesnt-take-much")?);
     assert!(!auth.verify_password("captain", "nope")?);
+    let metadata = auth
+        .decrypt_user_metadata(&user_record)?
+        .unwrap_or_default();
+    println!(
+        "decrypted metadata => {}",
+        String::from_utf8_lossy(&metadata)
+    );
 
     // Generate and authenticate an API key tied to the same user.
-    let (key_record, token) = auth.create_api_key(&user, None)?;
+    let (key_record, token) = auth.create_api_key(&user_record.user_id, None)?;
     println!("issued key {} with token {}", key_record.key_id, token);
     let hydrated = auth
         .authenticate_api_key(&token)?
