@@ -9,6 +9,61 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - Deterministic state machine interface so consensus can be layered on later.
 - Integrated authentication helper that remains isolated from core get/put APIs.
 
+## Quick Start
+
+Add `hightower-kv` as a dependency and spin up a `SingleNodeEngine`:
+
+```rust
+use hightower_kv::{SingleNodeEngine, StoreConfig};
+
+fn main() -> hightower_kv::Result<()> {
+    // Persist data under ./kv-data and fan writes across four worker threads.
+    let mut config = StoreConfig::default();
+    config.data_dir = "./kv-data".into();
+    config.worker_threads = 4;
+
+    let engine = SingleNodeEngine::with_config(config)?;
+    engine.put(b"alpha".to_vec(), b"bravo".to_vec())?;
+
+    if let Some(bytes) = engine.get(b"alpha")? {
+        println!("alpha => {}", String::from_utf8_lossy(&bytes));
+    }
+
+    engine.flush()?;
+    Ok(())
+}
+```
+
+Prefer the original single-threaded behaviour? Set `worker_threads = 0` and all
+submissions will run inline on the caller.
+
+### Authentication helper
+
+```rust
+use hightower_kv::crypto::{AesGcmEncryptor, Argon2SecretHasher};
+use hightower_kv::{AuthService, SingleNodeEngine, StoreConfig};
+
+fn bootstrap_auth() -> hightower_kv::Result<()> {
+    let mut config = StoreConfig::default();
+    config.data_dir = "./auth-data".into();
+
+    let engine = SingleNodeEngine::with_config(config)?;
+    let hasher = Argon2SecretHasher::default();
+    let encryptor = AesGcmEncryptor::new([0u8; 32]);
+    let auth = AuthService::new(engine, hasher, encryptor);
+
+    let user = auth.create_user("captain", "it-doesnt-take-much")?;
+    println!("created user {}", user.user_id);
+    Ok(())
+}
+```
+
+Additional runnable samples live under `examples/`:
+
+- `cargo run --example basic_kv` demonstrates simple put/get/delete calls.
+- `cargo run --example auth_flow` wires in `AuthService`, hashes passwords, and
+  issues API keys.
+
 ## Core Decisions
 ### Storage Engine
 - Log-structured segments with sequential append-only writes and periodic compaction.
