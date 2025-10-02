@@ -7,6 +7,11 @@ description = "Generate random hightower-style names with epic adjectives and no
 repository = "https://github.com/yourusername/hightower-naming"
 keywords = ["random", "names", "generator"]
 categories = ["development-tools"]
+exclude = [
+    ".gitignore",
+    ".git/",
+    "target/",
+]
 
 [dependencies]
 rand = "0.8"
