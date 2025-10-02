@@ -1,6 +1,6 @@
 # hightower-naming
 
-Generate random hightower-style names with epic adjectives and nouns.
+Generate random hightower-style names with adjectives and nouns.
 
 ## Installation
 
@@ -61,8 +61,8 @@ Generated names follow the format:
 - With prefix: `{prefix}-{adjective}-{noun}[-{random}]`
 
 - **Prefix**: Optional custom prefix (default: none)
-- **Adjective**: Random epic adjective (e.g., "alpha", "legendary", "unstoppable")
-- **Noun**: Random powerful noun (e.g., "warrior", "titan", "phoenix")
+- **Adjective**: Random adjective (e.g., "alpha", "legendary", "unstoppable")
+- **Noun**: Random noun (e.g., "warrior", "titan", "phoenix")
 - **Random suffix**: Optional alphanumeric string
 
 ## Examples
