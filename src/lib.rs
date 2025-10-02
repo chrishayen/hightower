@@ -98,4 +98,13 @@ mod tests {
         let name = generate_random_name(Some(0));
         assert_eq!(name.matches('-').count(), 2);
     }
+
+    #[test]
+    fn test_no_trailing_dash() {
+        let name_no_suffix = generate_random_name(None);
+        assert!(!name_no_suffix.ends_with('-'));
+
+        let name_zero_suffix = generate_random_name(Some(0));
+        assert!(!name_zero_suffix.ends_with('-'));
+    }
 }
