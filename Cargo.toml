@@ -2,9 +2,9 @@
 name = "hightower-naming"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
-description = "Generate random hightower-style names with epic adjectives and nouns"
-repository = "https://github.com/yourusername/hightower-naming"
+authors = ["Chris Hayen"]
+description = "Generate random names with epic adjectives and nouns"
+repository = "https://github.com/chrishayen/hightower-naming"
 keywords = ["random", "names", "generator"]
 categories = ["development-tools"]
 exclude = [
