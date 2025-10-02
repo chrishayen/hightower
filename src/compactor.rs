@@ -23,6 +23,7 @@ pub struct CompactionConfig {
     pub min_bytes: u64,
     pub max_segments: usize,
     pub tombstone_grace: Duration,
+    pub emit_snapshot: bool,
 }
 
 impl Default for CompactionConfig {
@@ -31,6 +32,7 @@ impl Default for CompactionConfig {
             min_bytes: 32 * 1024 * 1024,
             max_segments: 4,
             tombstone_grace: Duration::from_secs(300),
+            emit_snapshot: false,
         }
     }
 }
@@ -61,6 +63,7 @@ impl Compactor {
             tombstone_grace: self.config.tombstone_grace,
             min_bytes: self.config.min_bytes,
             max_segments: self.config.max_segments,
+            emit_snapshot: self.config.emit_snapshot,
         };
         if !self.storage.compact_all(options)? {
             return Ok(());
@@ -248,6 +251,30 @@ mod tests {
         for id in before_ids.iter().skip(1) {
             assert!(after_ids.contains(id));
         }
+    }
+
+    #[test]
+    fn emit_snapshot_is_best_effort() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp.path().join("compactor").to_string_lossy().into_owned();
+        cfg.max_segment_size = 64;
+        let storage = Arc::new(Storage::new(&cfg).unwrap());
+
+        storage
+            .apply(&Command::Set {
+                key: b"k".to_vec(),
+                value: b"v".to_vec(),
+                version: 1,
+                timestamp: 1,
+            })
+            .unwrap();
+
+        let mut config = CompactionConfig::default();
+        config.min_bytes = 0;
+        config.emit_snapshot = true;
+        let compactor = Compactor::new(storage, config);
+        compactor.run_once().unwrap();
     }
 
     #[test]

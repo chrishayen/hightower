@@ -11,6 +11,8 @@ use crate::config::StoreConfig;
 use crate::error::{Error, Result};
 use crate::index::{Index, IndexEntry};
 use crate::log_segment::{LogSegment, SegmentConfig};
+use crate::snapshot::Snapshot;
+use crate::state::KvState;
 
 const SEGMENT_PREFIX: &str = "segment-";
 const SEGMENT_SUFFIX: &str = ".log";
@@ -20,6 +22,7 @@ pub struct CompactionOptions {
     pub tombstone_grace: Duration,
     pub min_bytes: u64,
     pub max_segments: usize,
+    pub emit_snapshot: bool,
 }
 
 #[derive(Debug)]
@@ -100,8 +103,8 @@ impl Storage {
     }
 
     pub fn compact_all(&self, options: CompactionOptions) -> Result<bool> {
-        match SuspendedCompaction::prepare(self, options)? {
-            Some(compaction) => compaction.execute(),
+        match SuspendedCompaction::prepare(self, options.clone())? {
+            Some(compaction) => compaction.execute(options.emit_snapshot),
             None => Ok(false),
         }
     }
@@ -109,6 +112,25 @@ impl Storage {
     pub fn sync(&self) -> Result<()> {
         let active = { self.active_segment.read().clone() };
         active.sync()
+    }
+
+    pub fn state_snapshot(&self) -> KvState {
+        let index = self.index.read();
+        let mut state = KvState::new();
+        for (key, entry) in index.iter() {
+            if entry.is_tombstone {
+                state.apply(&Command::Delete {
+                    key: key.clone(),
+                    version: entry.version,
+                    timestamp: 0,
+                });
+                continue;
+            }
+            if let Ok(Some(command)) = self.fetch_command(entry) {
+                state.apply(&command);
+            }
+        }
+        state
     }
 
     pub fn replay<F>(&self, mut visitor: F) -> Result<()>
@@ -281,7 +303,7 @@ impl<'a> SuspendedCompaction<'a> {
         }))
     }
 
-    fn execute(self) -> Result<bool> {
+    fn execute(self, emit_snapshot: bool) -> Result<bool> {
         let SuspendedCompaction {
             storage,
             options,
@@ -407,12 +429,21 @@ impl<'a> SuspendedCompaction<'a> {
                 index_guard.remove(key.as_slice());
             }
             for (key, entry) in new_entries {
-                index_guard.upsert(key, entry);
+                index_guard.upsert(key, entry.clone());
             }
         }
 
         for path in old_paths {
             let _ = remove_file(path);
+        }
+
+        if emit_snapshot {
+            let state = storage.state_snapshot();
+            if let Err(err) = Snapshot::create(&state) {
+                if !matches!(err, Error::Unimplemented(_)) {
+                    return Err(err);
+                }
+            }
         }
 
         Ok(true)
@@ -556,5 +587,40 @@ mod tests {
             .map(|command| (command.key().to_vec(), command.version()))
             .collect();
         assert_eq!(replayed, expected);
+    }
+
+    #[test]
+    fn state_snapshot_reflects_latest_index() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let storage = Storage::new(&cfg).unwrap();
+
+        storage
+            .apply(&Command::Set {
+                key: b"a".to_vec(),
+                value: b"1".to_vec(),
+                version: 1,
+                timestamp: 1,
+            })
+            .unwrap();
+        storage
+            .apply(&Command::Delete {
+                key: b"a".to_vec(),
+                version: 2,
+                timestamp: 2,
+            })
+            .unwrap();
+        storage
+            .apply(&Command::Set {
+                key: b"b".to_vec(),
+                value: b"2".to_vec(),
+                version: 3,
+                timestamp: 3,
+            })
+            .unwrap();
+
+        let snapshot = storage.state_snapshot();
+        assert!(snapshot.get(b"a").is_none());
+        assert_eq!(snapshot.get(b"b"), Some(&b"2"[..]));
     }
 }
