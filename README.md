@@ -13,38 +13,24 @@ hightower-naming = "0.1.0"
 
 ## Usage
 
-### Basic Usage
-
 ```rust
 use hightower_naming::generate_random_name;
 
 fn main() {
-    let name = generate_random_name();
+    // Generate name with 5 character suffix (default)
+    let name = generate_random_name(Some(5));
     println!("{}", name);
     // Example output: ht-legendary-dragon-7x9k2
-}
-```
 
-### Advanced Usage
-
-```rust
-use hightower_naming::generate_random_name_with_options;
-
-fn main() {
     // Generate name without random suffix
-    let name = generate_random_name_with_options(None);
+    let name = generate_random_name(None);
     println!("{}", name);
     // Example output: ht-legendary-dragon
 
     // Generate name with custom suffix length
-    let name = generate_random_name_with_options(Some(10));
+    let name = generate_random_name(Some(10));
     println!("{}", name);
     // Example output: ht-legendary-dragon-a3x9z7m4k2
-
-    // Generate name with default suffix length (5 characters)
-    let name = generate_random_name_with_options(Some(5));
-    println!("{}", name);
-    // Example output: ht-legendary-dragon-7x9k2
 }
 ```
 
