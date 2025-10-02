@@ -11,6 +11,16 @@ use crate::storage::Storage;
 
 pub trait KvEngine: Send + Sync {
     fn submit(&self, command: Command) -> Result<ApplyOutcome>;
+    fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
+    where
+        I: IntoIterator<Item = Command>,
+    {
+        let mut outcomes = Vec::new();
+        for command in commands {
+            outcomes.push(self.submit(command)?);
+        }
+        Ok(outcomes)
+    }
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 }
 
@@ -81,6 +91,52 @@ impl SingleNodeEngine {
     pub fn flush(&self) -> Result<()> {
         self.storage.sync()
     }
+
+    pub fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
+    where
+        I: IntoIterator<Item = Command>,
+    {
+        self.submit_batch_inner(commands.into_iter())
+    }
+
+    pub fn read_with<F, R>(&self, reader: F) -> R
+    where
+        F: FnOnce(&KvState) -> R,
+    {
+        let guard = self.state.read();
+        reader(&guard)
+    }
+
+    fn submit_batch_inner<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
+    where
+        I: Iterator<Item = Command>,
+    {
+        let mut state_guard = self.state.write();
+        let mut outcomes = Vec::new();
+        let mut pending: Vec<(usize, Command)> = Vec::new();
+
+        for command in commands {
+            let outcome = state_guard.evaluate(&command);
+            match outcome {
+                ApplyOutcome::Applied | ApplyOutcome::Removed => {
+                    let index = outcomes.len();
+                    outcomes.push(outcome);
+                    pending.push((index, command));
+                }
+                ApplyOutcome::IgnoredStale => {
+                    outcomes.push(ApplyOutcome::IgnoredStale);
+                }
+            }
+        }
+
+        for (index, command) in pending {
+            self.storage.apply(&command)?;
+            let applied = state_guard.apply(&command);
+            debug_assert_eq!(applied, outcomes[index]);
+        }
+
+        Ok(outcomes)
+    }
 }
 
 impl KvEngine for SingleNodeEngine {
@@ -99,6 +155,13 @@ impl KvEngine for SingleNodeEngine {
             }
             ApplyOutcome::IgnoredStale => Ok(ApplyOutcome::IgnoredStale),
         }
+    }
+
+    fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
+    where
+        I: IntoIterator<Item = Command>,
+    {
+        self.submit_batch_inner(commands.into_iter())
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
@@ -233,5 +296,79 @@ mod tests {
         let engine = SingleNodeEngine::with_config(cfg).unwrap();
         engine.put(b"key".to_vec(), b"value".to_vec()).unwrap();
         engine.flush().unwrap();
+    }
+
+    #[test]
+    fn submit_batch_applies_multiple_commands() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+
+        let commands = vec![
+            Command::Set {
+                key: b"a".to_vec(),
+                value: b"1".to_vec(),
+                version: engine.version_gen.next(),
+                timestamp: 1,
+            },
+            Command::Set {
+                key: b"b".to_vec(),
+                value: b"2".to_vec(),
+                version: engine.version_gen.next(),
+                timestamp: 2,
+            },
+        ];
+
+        let outcomes = engine.submit_batch(commands.clone()).unwrap();
+        assert!(
+            outcomes
+                .iter()
+                .all(|outcome| matches!(outcome, ApplyOutcome::Applied))
+        );
+        assert_eq!(engine.get(b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(engine.get(b"b").unwrap(), Some(b"2".to_vec()));
+    }
+
+    #[test]
+    fn submit_batch_skips_stale_commands() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+        engine.put(b"k".to_vec(), b"v1".to_vec()).unwrap();
+
+        let stale = Command::Set {
+            key: b"k".to_vec(),
+            value: b"old".to_vec(),
+            version: 1,
+            timestamp: 10,
+        };
+        let fresh = Command::Set {
+            key: b"k".to_vec(),
+            value: b"v2".to_vec(),
+            version: engine.version_gen.next(),
+            timestamp: 11,
+        };
+
+        let outcomes = engine.submit_batch(vec![stale, fresh]).unwrap();
+        assert!(matches!(outcomes[0], ApplyOutcome::IgnoredStale));
+        assert!(matches!(outcomes[1], ApplyOutcome::Applied));
+        assert_eq!(engine.get(b"k").unwrap(), Some(b"v2".to_vec()));
+    }
+
+    #[test]
+    fn read_with_provides_consistent_snapshot() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+        engine.put(b"snap".to_vec(), b"value".to_vec()).unwrap();
+
+        let snapshot = engine.read_with(|state| {
+            state
+                .get(b"snap")
+                .map(|bytes| bytes.to_vec())
+                .unwrap_or_default()
+        });
+
+        assert_eq!(snapshot, b"value".to_vec());
     }
 }

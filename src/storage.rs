@@ -86,7 +86,13 @@ impl Storage {
     }
 
     pub fn lookup(&self, key: &[u8]) -> Option<IndexEntry> {
-        self.index.read().get(key).cloned()
+        if let Some(entry) = self.index.read().get(key).cloned() {
+            return Some(entry);
+        }
+        match self.recover_index_entry(key) {
+            Ok(entry) => entry,
+            Err(_) => None,
+        }
     }
 
     pub fn fetch_command(&self, entry: &IndexEntry) -> Result<Option<Command>> {
@@ -186,6 +192,31 @@ impl Storage {
         segments.push(segment.clone());
         *self.active_segment.write() = segment;
         Ok(())
+    }
+}
+
+impl Storage {
+    fn recover_index_entry(&self, key: &[u8]) -> Result<Option<IndexEntry>> {
+        let segments = self.segments.read().clone();
+        for segment in segments.iter().rev() {
+            if !segment.might_contain(key) {
+                continue;
+            }
+            if let Some((position, command)) = segment.locate(key)? {
+                let entry = IndexEntry {
+                    segment_id: segment.id(),
+                    offset: position.offset,
+                    length: position.length,
+                    version: command.version(),
+                    is_tombstone: matches!(command, Command::Delete { .. }),
+                };
+                self.index
+                    .write()
+                    .upsert(command.key().to_vec(), entry.clone());
+                return Ok(Some(entry));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -642,5 +673,28 @@ mod tests {
         let snapshot = storage.state_snapshot();
         assert!(snapshot.get(b"a").is_none());
         assert_eq!(snapshot.get(b"b"), Some(&b"2"[..]));
+    }
+
+    #[test]
+    fn lookup_recovers_entry_from_segments() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let storage = Storage::new(&cfg).unwrap();
+
+        let command = Command::Set {
+            key: b"recover".to_vec(),
+            value: b"value".to_vec(),
+            version: 42,
+            timestamp: 1,
+        };
+        storage.apply(&command).unwrap();
+
+        // Remove from hot index to simulate eviction.
+        storage.index.write().remove(b"recover");
+
+        let entry = storage.lookup(b"recover").unwrap();
+        assert_eq!(entry.version, 42);
+        let fetched = storage.fetch_command(&entry).unwrap().unwrap();
+        assert_eq!(fetched, command);
     }
 }

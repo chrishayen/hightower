@@ -146,6 +146,61 @@ impl LogSegment {
         self.metadata.lock().bloom.check(&key.to_vec())
     }
 
+    pub fn locate(&self, key: &[u8]) -> Result<Option<(LogPosition, Command)>> {
+        if !self.might_contain(key) {
+            return Ok(None);
+        }
+
+        let start_offset = {
+            let metadata = self.metadata.lock();
+            let sparse = &metadata.sparse_index;
+            if sparse.is_empty() {
+                0u64
+            } else {
+                let idx = sparse.binary_search_by(|entry| entry.key.as_slice().cmp(key));
+                match idx {
+                    Ok(i) => sparse[i].offset,
+                    Err(0) => 0,
+                    Err(i) => sparse[i - 1].offset,
+                }
+            }
+        };
+
+        let mut file = self.file.lock();
+        file.seek(SeekFrom::Start(start_offset))?;
+
+        let mut offset = start_offset;
+        let mut latest: Option<(LogPosition, Command)> = None;
+
+        loop {
+            let mut len_buf = [0u8; 4];
+            match file.read_exact(&mut len_buf) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(Error::Io(err)),
+            }
+            let len = u32::from_le_bytes(len_buf);
+            let mut buf = vec![0u8; len as usize];
+            file.read_exact(&mut buf)?;
+            let command: Command = serde_cbor::from_slice(&buf)
+                .map_err(|err| Error::Serialization(err.to_string()))?;
+            if command.key() == key {
+                latest = Some((
+                    LogPosition {
+                        offset,
+                        length: len,
+                    },
+                    command,
+                ));
+            }
+            offset = offset
+                .checked_add(4 + len as u64)
+                .ok_or_else(|| Error::Serialization("log offset overflow during locate".into()))?;
+        }
+
+        Ok(latest)
+    }
+
     pub fn append(&self, command: &Command) -> Result<LogPosition> {
         let encoded =
             serde_cbor::to_vec(command).map_err(|err| Error::Serialization(err.to_string()))?;
@@ -239,7 +294,7 @@ where
         let len = u32::from_le_bytes(len_buf);
         let mut buf = vec![0u8; len as usize];
         file.read_exact(&mut buf)?;
-        let command =
+        let command: Command =
             serde_cbor::from_slice(&buf).map_err(|err| Error::Serialization(err.to_string()))?;
         visitor(offset, len, command)?;
         offset += 4 + len as u64;
@@ -305,5 +360,38 @@ mod tests {
         let path = dir.path().join("segment.log");
         let segment = LogSegment::open(SegmentConfig::new(2, &path)).unwrap();
         assert!(segment.read(1024).unwrap().is_none());
+    }
+
+    #[test]
+    fn locate_finds_latest_entry_for_key() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("segment.log");
+        let mut cfg = SegmentConfig::new(7, &path);
+        cfg.sparse_every = 2;
+        let segment = LogSegment::open(cfg).unwrap();
+
+        for version in 0..5u64 {
+            let command = Command::Set {
+                key: b"target".to_vec(),
+                value: vec![version as u8],
+                version,
+                timestamp: version as i64,
+            };
+            segment.append(&command).unwrap();
+        }
+
+        let command = Command::Set {
+            key: b"other".to_vec(),
+            value: b"value".to_vec(),
+            version: 9,
+            timestamp: 9,
+        };
+        segment.append(&command).unwrap();
+
+        let located = segment.locate(b"target").unwrap().unwrap();
+        assert_eq!(located.1.version(), 4);
+        assert_eq!(located.1.key(), b"target");
+
+        assert!(segment.locate(b"missing").unwrap().is_none());
     }
 }

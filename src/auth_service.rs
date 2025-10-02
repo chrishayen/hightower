@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::auth_types::{ApiKeyRecord, UserRecord};
 use crate::command::Command;
-use crate::crypto::{EnvelopeEncryptor, SecretHasher};
+use crate::crypto::{EncryptedBlob, EnvelopeEncryptor, SecretHasher};
 use crate::engine::KvEngine;
 use crate::error::{Error, Result};
 use crate::id_generator::IdGenerator;
@@ -23,7 +23,7 @@ where
 {
     engine: E,
     hasher: H,
-    _crypto: C,
+    crypto: C,
     id_gen: IdGenerator,
 }
 
@@ -37,12 +37,21 @@ where
         Self {
             engine,
             hasher,
-            _crypto: crypto,
+            crypto,
             id_gen: IdGenerator::default(),
         }
     }
 
     pub fn create_user(&self, username: &str, password: &str) -> Result<UserRecord> {
+        self.create_user_with_metadata(username, password, None)
+    }
+
+    pub fn create_user_with_metadata(
+        &self,
+        username: &str,
+        password: &str,
+        metadata: Option<&[u8]>,
+    ) -> Result<UserRecord> {
         let normalized_username = normalize_username(username);
         if normalized_username.is_empty() {
             return Err(Error::Validation("username cannot be empty"));
@@ -54,11 +63,12 @@ where
 
         let user_id = format!("usr-{:016x}", self.id_gen.next());
         let password_hash = self.hasher.hash_secret(password.as_bytes())?;
+        let metadata = self.encrypt_optional(metadata)?;
         let record = UserRecord {
             user_id: user_id.clone(),
             username: username.trim().to_string(),
             password_hash,
-            metadata: None,
+            metadata,
             created_at: current_timestamp(),
             last_login: None,
             failed_attempts: 0,
@@ -66,7 +76,10 @@ where
         record.validate()?;
 
         self.persist_user_record(&record)?;
-        self.put_value(username_index_key(&normalized_username), user_id.into_bytes())?;
+        self.put_value(
+            username_index_key(&normalized_username),
+            user_id.into_bytes(),
+        )?;
 
         Ok(record)
     }
@@ -102,6 +115,15 @@ where
         user_id: &str,
         label: Option<&str>,
     ) -> Result<(ApiKeyRecord, String)> {
+        self.create_api_key_with_metadata(user_id, label, None)
+    }
+
+    pub fn create_api_key_with_metadata(
+        &self,
+        user_id: &str,
+        label: Option<&str>,
+        metadata: Option<&[u8]>,
+    ) -> Result<(ApiKeyRecord, String)> {
         let Some(_user) = self.load_user_by_id(user_id)? else {
             return Err(Error::NotFound("auth_service::user"));
         };
@@ -109,12 +131,13 @@ where
         let key_id = format!("key-{:016x}", self.id_gen.next());
         let secret = random_token();
         let token_hash = self.hasher.hash_secret(secret.as_bytes())?;
+        let metadata = self.encrypt_optional(metadata)?;
         let record = ApiKeyRecord {
             key_id: key_id.clone(),
             owner_id: user_id.to_string(),
             token_hash,
             label: label.map(|value| value.to_string()),
-            metadata: None,
+            metadata,
             created_at: current_timestamp(),
             last_used: None,
         };
@@ -146,6 +169,14 @@ where
         record.last_used = Some(current_timestamp());
         self.persist_api_key_record(&record)?;
         Ok(Some(record))
+    }
+
+    pub fn decrypt_user_metadata(&self, user: &UserRecord) -> Result<Option<Vec<u8>>> {
+        self.decrypt_optional(user.metadata.as_ref())
+    }
+
+    pub fn decrypt_api_key_metadata(&self, api_key: &ApiKeyRecord) -> Result<Option<Vec<u8>>> {
+        self.decrypt_optional(api_key.metadata.as_ref())
     }
 
     fn persist_user_record(&self, record: &UserRecord) -> Result<()> {
@@ -193,6 +224,20 @@ where
                     .map_err(|_| Error::Serialization("invalid username index utf8".into()))?;
                 Ok(Some(user_id))
             }
+            None => Ok(None),
+        }
+    }
+
+    fn encrypt_optional(&self, payload: Option<&[u8]>) -> Result<Option<EncryptedBlob>> {
+        match payload {
+            Some(bytes) if !bytes.is_empty() => Ok(Some(self.crypto.encrypt(bytes)?)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    fn decrypt_optional(&self, blob: Option<&EncryptedBlob>) -> Result<Option<Vec<u8>>> {
+        match blob {
+            Some(blob) => self.crypto.decrypt(blob).map(Some),
             None => Ok(None),
         }
     }
@@ -273,21 +318,30 @@ mod tests {
     use crate::engine::SingleNodeEngine;
     use tempfile::tempdir;
 
-    #[test]
-    fn create_user_persists_record_and_index() {
+    type TestService = AuthService<SingleNodeEngine, Argon2SecretHasher, AesGcmEncryptor>;
+
+    fn build_service(suffix: &str, key: [u8; 32]) -> (TestService, tempfile::TempDir) {
         let temp = tempdir().unwrap();
         let mut cfg = StoreConfig::default();
         cfg.data_dir = temp
             .path()
-            .join("create-user")
+            .join(format!("auth-{suffix}"))
             .to_string_lossy()
             .into_owned();
         let engine = SingleNodeEngine::with_config(cfg).unwrap();
-        let svc = AuthService::new(
-            engine,
-            Argon2SecretHasher::default(),
-            AesGcmEncryptor::new([0u8; 32]),
-        );
+        (
+            AuthService::new(
+                engine,
+                Argon2SecretHasher::default(),
+                AesGcmEncryptor::new(key),
+            ),
+            temp,
+        )
+    }
+
+    #[test]
+    fn create_user_persists_record_and_index() {
+        let (svc, _guard) = build_service("create-user", [0u8; 32]);
         let record = svc.create_user("Alice", "secret").unwrap();
         assert_eq!(record.username, "Alice");
         assert!(svc.verify_password("alice", "secret").unwrap());
@@ -296,39 +350,19 @@ mod tests {
 
     #[test]
     fn duplicate_usernames_are_rejected() {
-        let temp = tempdir().unwrap();
-        let mut cfg = StoreConfig::default();
-        cfg.data_dir = temp
-            .path()
-            .join("duplicate-user")
-            .to_string_lossy()
-            .into_owned();
-        let engine = SingleNodeEngine::with_config(cfg).unwrap();
-        let svc = AuthService::new(
-            engine,
-            Argon2SecretHasher::default(),
-            AesGcmEncryptor::new([0u8; 32]),
-        );
+        let (svc, _guard) = build_service("duplicate-user", [1u8; 32]);
         svc.create_user("bob", "secret").unwrap();
         let err = svc.create_user("BOB", "secret").unwrap_err();
-        assert!(matches!(err, Error::Conflict("auth_service::username_exists")));
+        assert!(matches!(
+            err,
+            Error::Conflict("auth_service::username_exists")
+        ));
     }
 
     #[test]
     fn create_api_key_returns_token_that_round_trips() {
-        let temp = tempdir().unwrap();
-        let mut cfg = StoreConfig::default();
-        cfg.data_dir = temp
-            .path()
-            .join("create-key")
-            .to_string_lossy()
-            .into_owned();
-        let engine = SingleNodeEngine::with_config(cfg).unwrap();
-        let svc = AuthService::new(
-            engine,
-            Argon2SecretHasher::default(),
-            AesGcmEncryptor::new([0u8; 32]),
-        );
+        let key_bytes = [2u8; 32];
+        let (svc, _guard) = build_service("create-key", key_bytes);
         let user = svc.create_user("user", "pass").unwrap();
         let (key_record, token) = svc.create_api_key(&user.user_id, Some("primary")).unwrap();
         assert!(token.starts_with(&key_record.key_id));
@@ -339,20 +373,64 @@ mod tests {
 
     #[test]
     fn authenticate_api_key_rejects_invalid_tokens() {
-        let temp = tempdir().unwrap();
-        let mut cfg = StoreConfig::default();
-        cfg.data_dir = temp
-            .path()
-            .join("invalid-token")
-            .to_string_lossy()
-            .into_owned();
-        let engine = SingleNodeEngine::with_config(cfg).unwrap();
-        let svc = AuthService::new(
-            engine,
-            Argon2SecretHasher::default(),
-            AesGcmEncryptor::new([0u8; 32]),
-        );
+        let (svc, _guard) = build_service("invalid-token", [3u8; 32]);
         svc.create_user("user", "pass").unwrap();
         assert!(svc.authenticate_api_key("invalid").unwrap().is_none());
+    }
+
+    #[test]
+    fn user_metadata_is_encrypted() {
+        let key_bytes = [4u8; 32];
+        let (svc, _guard) = build_service("user-metadata", key_bytes);
+        let record = svc
+            .create_user_with_metadata("user", "secret", Some(b"payload"))
+            .unwrap();
+        let plaintext = svc.decrypt_user_metadata(&record).unwrap().unwrap();
+        assert_eq!(plaintext, b"payload");
+    }
+
+    #[test]
+    fn api_key_metadata_is_encrypted() {
+        let key_bytes = [5u8; 32];
+        let (svc, _guard) = build_service("apikey-metadata", key_bytes);
+        let user = svc.create_user("user", "secret").unwrap();
+        let (record, _) = svc
+            .create_api_key_with_metadata(&user.user_id, None, Some(b"api-metadata"))
+            .unwrap();
+        let plaintext = svc.decrypt_api_key_metadata(&record).unwrap().unwrap();
+        assert_eq!(plaintext, b"api-metadata");
+    }
+
+    #[test]
+    fn wrong_password_returns_false_without_panicking() {
+        let (svc, _guard) = build_service("wrong-password", [6u8; 32]);
+        svc.create_user("user", "secret").unwrap();
+        assert!(!svc.verify_password("user", "nope").unwrap());
+        assert!(!svc.verify_password("missing", "secret").unwrap());
+    }
+
+    #[test]
+    fn decrypt_helpers_gracefully_handle_missing_metadata() {
+        let (svc, _guard) = build_service("missing-metadata", [8u8; 32]);
+        let user = svc.create_user("user", "secret").unwrap();
+        assert!(svc.decrypt_user_metadata(&user).unwrap().is_none());
+        let (api_key, _) = svc.create_api_key(&user.user_id, None).unwrap();
+        assert!(svc.decrypt_api_key_metadata(&api_key).unwrap().is_none());
+    }
+
+    #[test]
+    fn api_key_with_wrong_secret_is_rejected() {
+        let (svc, _guard) = build_service("wrong-secret", [7u8; 32]);
+        let user = svc.create_user("user", "secret").unwrap();
+        let (record, token) = svc.create_api_key(&user.user_id, None).unwrap();
+        let mut pieces = token.split('.');
+        let key_id = pieces.next().unwrap();
+        let bad_token = format!("{key_id}.bogus");
+        assert!(svc.authenticate_api_key(&bad_token).unwrap().is_none());
+        assert!(
+            svc.authenticate_api_key(&format!("{}.{}", record.key_id, "notreal"))
+                .unwrap()
+                .is_none()
+        );
     }
 }

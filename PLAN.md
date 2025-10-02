@@ -42,15 +42,15 @@
 # TODO Checklist
 - [x] Initialize Cargo project and baseline modules.
 - [x] Define shared error handling and config structures.
-- [ ] Implement log segments with sparse index + Bloom filter.
+- [x] Implement log segments with sparse index + Bloom filter.
 - [ ] Build in-memory index manager with rebuild support.
 - [ ] Wire storage facade with compaction and snapshots.
 - [x] Implement deterministic state machine and command serialization.
-- [ ] Provide single-node engine with batching + read contexts.
+- [x] Provide single-node engine with batching + read contexts.
 - [x] Add metrics scaffolding and configuration hooks.
 - [x] Implement crypto abstractions (hasher + encryptor).
 - [x] Create auth data types and serialization helpers.
-- [ ] Build AuthService with secondary indexes.
+- [x] Build AuthService with secondary indexes.
 - [x] Write unit/component/integration tests for storage, engine, and auth.
 - [ ] Flesh out replication traits and single-node adapter.
 - [ ] Document extension points and developer guidance.

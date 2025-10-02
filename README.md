@@ -20,6 +20,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - `Command` enum captures set/delete/batch operations. Each command applies deterministically to the `KvState` state machine.
 - `KvEngine` facade routes commands to storage and provides read contexts; today it invokes storage directly, later it can submit via consensus.
 - Writes support batching and configurable fsync cadence to balance durability vs. latency.
+- `SingleNodeEngine` exposes `submit_batch` for grouped writes and `read_with` for consistent read snapshots built on the in-memory state.
 
 ### Replication Readiness
 - Define neutral traits (`CommandSubmitter`, `SnapshotProvider`) under `replication.rs` that the single-node engine fulfills trivially.
@@ -36,6 +37,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - Key space namespaced under `auth/*` (e.g., `auth/user/<id>`, `auth/apikey/<id>`) with secondary indexes for lookups (`auth/user_by_name/<username>`).
 - Passwords/API keys stored as hashes using configurable `SecretHasher` (Argon2/Bcrypt). Encrypted metadata blobs handled by `EnvelopeEncryptor` (e.g., AES-GCM).
 - API produces helpers like `create_user`, `verify_password`, `create_api_key`, each maintaining indexes via batched writes.
+- Metadata passed to `create_user_with_metadata` / `create_api_key_with_metadata` is envelope-encrypted and stored alongside the record (`UserRecord.metadata`, `ApiKeyRecord.metadata`), ensuring sensitive attributes never hit disk in plaintext; callers can recover it through the service-level decrypt helpers without touching cipher primitives.
 
 ### Configuration & Telemetry
 - Central `config.rs` defines storage paths, compaction thresholds, flush cadence, auth crypto settings.
