@@ -13,7 +13,7 @@ fn bench_engine_writes(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("put_1k", label), &(key_len, value_len), |b, &(k, v)| {
             b.iter_batched(
                 setup_engine,
-                |mut harness| {
+                |harness| {
                     let mut rng = StdRng::seed_from_u64(42);
                     for _ in 0..1024 {
                         harness
@@ -35,7 +35,7 @@ fn bench_engine_reads(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("get_4k", label), |b| {
             b.iter_batched(
                 || prepare_dataset(4096, 16, 256, cold),
-                |(mut harness, keys)| {
+                |(harness, keys)| {
                     for key in keys {
                         let _ = harness.engine.get(&key).unwrap();
                     }
@@ -52,7 +52,7 @@ fn bench_compaction(c: &mut Criterion) {
     group.bench_function("run_compaction_now", |b| {
         b.iter_batched(
             || {
-                let mut harness = setup_engine();
+                let harness = setup_engine();
                 let mut rng = StdRng::seed_from_u64(999);
                 for i in 0..20_000 {
                     harness
@@ -65,7 +65,7 @@ fn bench_compaction(c: &mut Criterion) {
                 }
                 harness
             },
-            |mut harness| {
+            |harness| {
                 harness.engine.run_compaction_now().unwrap();
             },
             BatchSize::SmallInput,
@@ -80,7 +80,7 @@ fn prepare_dataset(
     value_len: usize,
     rebuild: bool,
 ) -> (EngineHarness, Vec<Vec<u8>>) {
-    let mut harness = setup_engine();
+    let harness = setup_engine();
     let mut rng = StdRng::seed_from_u64(867);
     let mut keys = Vec::with_capacity(count);
     for _ in 0..count {

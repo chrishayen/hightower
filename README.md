@@ -52,6 +52,20 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - `DEVELOPERS.md` documents storage/auth/replication extension points for
   contributors building on the engine.
 
+### Benchmark Summary
+Criterion benchmarks (`cargo bench`) measured on a single core, using tempdir
+storage with snapshot emission enabled:
+
+| Scenario | Payload | Throughput |
+|----------|---------|------------|
+| `engine_writes/put_1k/small` | 16 B keys / 64 B values | ~0.82 M ops/s |
+| `engine_writes/put_1k/large` | 32 B keys / 4 KB values | ~0.047 M ops/s |
+| `engine_reads/get_4k/hot` | 4 096 cached gets | ~6.3 M ops/s |
+| `engine_reads/get_4k/cold` | 4 096 gets after reopening | ~6.1 M ops/s |
+| `compaction/run_compaction_now` | 20 K writes + deletes | ~113 ms/run |
+
+Full reports (histograms, regression analysis) live under `target/criterion/`.
+
 ## File Layout
 Each logical component lives in its own file in a flat module structure:
 - `lib.rs` – module declarations and re-exports.
