@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::Result;
-use crate::storage::Storage;
+use crate::storage::{CompactionOptions, Storage};
 
 /// Coordinates background segment merges to keep disk usage and read
 /// amplification under control.
@@ -57,7 +57,12 @@ impl Compactor {
             return Ok(());
         }
 
-        if !self.storage.compact_all(self.config.tombstone_grace)? {
+        let options = CompactionOptions {
+            tombstone_grace: self.config.tombstone_grace,
+            min_bytes: self.config.min_bytes,
+            max_segments: self.config.max_segments,
+        };
+        if !self.storage.compact_all(options)? {
             return Ok(());
         }
 
@@ -118,14 +123,26 @@ mod tests {
             .unwrap();
         assert!(storage.segment_snapshot().len() > 1);
 
+        let sealed_before = storage.sealed_segments_snapshot();
+        assert!(sealed_before.len() >= 2);
+        let bytes_target: u64 = sealed_before
+            .iter()
+            .take(2)
+            .map(|segment| segment.bytes_written())
+            .sum();
+        let segments_to_merge = sealed_before.len().min(2);
+
         let mut config = CompactionConfig::default();
-        config.min_bytes = 0;
+        config.min_bytes = bytes_target;
+        config.max_segments = 2;
         let compactor = Compactor::new(storage.clone(), config);
         compactor.run_once().unwrap();
 
-        let segments = storage.segment_snapshot();
-        assert_eq!(segments.len(), 2);
-        assert_eq!(storage.sealed_segments_snapshot().len(), 1);
+        let sealed_after = storage.sealed_segments_snapshot();
+        assert_eq!(
+            sealed_after.len(),
+            sealed_before.len() - segments_to_merge + 1
+        );
         let entry = storage.lookup(b"key1").unwrap();
         assert!(entry.is_tombstone);
         let command = storage.fetch_command(&entry).unwrap().unwrap();
@@ -167,13 +184,70 @@ mod tests {
                 .unwrap();
         }
 
+        let victim_segment = storage.lookup(b"victim").unwrap().segment_id;
+        let sealed_before = storage.sealed_segments_snapshot();
+        let mut target_bytes = 0u64;
+        let mut segments_needed = 0usize;
+        for segment in &sealed_before {
+            segments_needed += 1;
+            target_bytes += segment.bytes_written();
+            if segment.id() == victim_segment {
+                break;
+            }
+        }
+
         let mut config = CompactionConfig::default();
-        config.min_bytes = 0;
+        config.min_bytes = target_bytes;
+        config.max_segments = segments_needed;
         config.tombstone_grace = Duration::from_secs(1);
         let compactor = Compactor::new(storage.clone(), config);
         compactor.run_once().unwrap();
 
         assert!(storage.lookup(b"victim").is_none());
+    }
+
+    #[test]
+    fn respects_max_segment_limit() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp.path().join("compactor").to_string_lossy().into_owned();
+        cfg.max_segment_size = 64;
+        let storage = Arc::new(Storage::new(&cfg).unwrap());
+
+        for i in 0..8 {
+            storage
+                .apply(&Command::Set {
+                    key: format!("hot{i}").into_bytes(),
+                    value: vec![b'x'; 32],
+                    version: i + 1,
+                    timestamp: i as i64,
+                })
+                .unwrap();
+        }
+
+        let sealed_before = storage.sealed_segments_snapshot();
+        assert!(sealed_before.len() >= 2);
+
+        let mut config = CompactionConfig::default();
+        config.min_bytes = 0;
+        config.max_segments = 1;
+        let compactor = Compactor::new(storage.clone(), config);
+        compactor.run_once().unwrap();
+
+        let sealed_after = storage.sealed_segments_snapshot();
+        let before_ids: Vec<u64> = sealed_before.iter().map(|segment| segment.id()).collect();
+        let after_ids: Vec<u64> = sealed_after.iter().map(|segment| segment.id()).collect();
+
+        let new_ids: Vec<u64> = after_ids
+            .iter()
+            .copied()
+            .filter(|id| !before_ids.contains(id))
+            .collect();
+        assert_eq!(new_ids.len(), 1);
+        assert!(!after_ids.contains(&before_ids[0]));
+        for id in before_ids.iter().skip(1) {
+            assert!(after_ids.contains(id));
+        }
     }
 
     #[test]

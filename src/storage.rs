@@ -15,6 +15,13 @@ use crate::log_segment::{LogSegment, SegmentConfig};
 const SEGMENT_PREFIX: &str = "segment-";
 const SEGMENT_SUFFIX: &str = ".log";
 
+#[derive(Clone, Debug)]
+pub struct CompactionOptions {
+    pub tombstone_grace: Duration,
+    pub min_bytes: u64,
+    pub max_segments: usize,
+}
+
 #[derive(Debug)]
 pub struct Storage {
     config: StoreConfig,
@@ -92,8 +99,8 @@ impl Storage {
         guard[..guard.len() - 1].to_vec()
     }
 
-    pub fn compact_all(&self, tombstone_grace: Duration) -> Result<bool> {
-        match SuspendedCompaction::prepare(self, tombstone_grace)? {
+    pub fn compact_all(&self, options: CompactionOptions) -> Result<bool> {
+        match SuspendedCompaction::prepare(self, options)? {
             Some(compaction) => compaction.execute(),
             None => Ok(false),
         }
@@ -230,22 +237,46 @@ fn normalized_item_estimate(max_segment_size: u64) -> usize {
 
 struct SuspendedCompaction<'a> {
     storage: &'a Storage,
-    tombstone_grace: Duration,
+    options: CompactionOptions,
     sealed: Vec<Arc<LogSegment>>,
     sealed_ids: HashSet<u64>,
 }
 
 impl<'a> SuspendedCompaction<'a> {
-    fn prepare(storage: &'a Storage, tombstone_grace: Duration) -> Result<Option<Self>> {
-        let sealed = storage.sealed_segments_snapshot();
-        if sealed.is_empty() {
+    fn prepare(storage: &'a Storage, options: CompactionOptions) -> Result<Option<Self>> {
+        let all_sealed = storage.sealed_segments_snapshot();
+        if all_sealed.is_empty() {
             return Ok(None);
         }
-        let sealed_ids = sealed.iter().map(|segment| segment.id()).collect();
+
+        let max_segments = options.max_segments;
+        let mut selected = Vec::new();
+        let mut accumulated_bytes = 0u64;
+
+        for segment in all_sealed.iter() {
+            if max_segments != 0 && selected.len() >= max_segments {
+                break;
+            }
+            accumulated_bytes += segment.bytes_written();
+            selected.push(segment.clone());
+            if options.min_bytes == 0 || accumulated_bytes >= options.min_bytes {
+                break;
+            }
+        }
+
+        if selected.is_empty() {
+            return Ok(None);
+        }
+
+        if options.min_bytes > 0 && accumulated_bytes < options.min_bytes {
+            return Ok(None);
+        }
+
+        let sealed_ids = selected.iter().map(|segment| segment.id()).collect();
         Ok(Some(Self {
             storage,
-            tombstone_grace,
-            sealed,
+            options,
+            sealed: selected,
             sealed_ids,
         }))
     }
@@ -253,7 +284,7 @@ impl<'a> SuspendedCompaction<'a> {
     fn execute(self) -> Result<bool> {
         let SuspendedCompaction {
             storage,
-            tombstone_grace,
+            options,
             sealed,
             sealed_ids,
         } = self;
@@ -281,6 +312,7 @@ impl<'a> SuspendedCompaction<'a> {
         let dir = PathBuf::from(&storage.config.data_dir);
         let new_segment = Arc::new(open_segment(&dir, new_id, &storage.config)?);
         let new_segment_path = new_segment.path().to_path_buf();
+        let tombstone_grace = options.tombstone_grace;
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|dur| dur.as_secs())
