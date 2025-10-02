@@ -8,7 +8,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-naming = "0.1.1"
+hightower-naming = "0.1.2"
 ```
 
 ## Usage
