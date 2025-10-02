@@ -44,6 +44,8 @@ should hook in.
   sensitive blobs are encrypted via the injected `EnvelopeEncryptor`.
 - Use the `run_compaction_now` engine helper to manage persistent auth data in
   tests that need deterministic storage layout.
+- `revoke_api_key` tombstones API keys so subsequent authentication attempts
+  fail; the helper returns `false` when the key was already absent.
 
 ### Crypto
 - Implement additional `SecretHasher` or `EnvelopeEncryptor` variants in

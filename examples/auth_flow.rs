@@ -44,6 +44,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("token should resolve");
     println!("token resolved to user {}", hydrated.owner_id);
 
+    // Revoke the key and confirm it no longer authenticates.
+    auth.revoke_api_key(&key_record.key_id)?;
+    assert!(auth.authenticate_api_key(&token)?.is_none());
+
     Ok(())
 }
 

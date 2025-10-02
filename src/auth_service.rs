@@ -171,6 +171,24 @@ where
         Ok(Some(record))
     }
 
+    pub fn revoke_api_key(&self, key_id: &str) -> Result<bool> {
+        if self.load_api_key_record(key_id)?.is_none() {
+            return Ok(false);
+        }
+
+        let command = Command::Delete {
+            key: api_key_key(key_id),
+            version: self.id_gen.next(),
+            timestamp: current_timestamp(),
+        };
+
+        match self.engine.submit(command)? {
+            ApplyOutcome::Removed => Ok(true),
+            ApplyOutcome::IgnoredStale => Ok(false),
+            ApplyOutcome::Applied => Ok(true),
+        }
+    }
+
     pub fn decrypt_user_metadata(&self, user: &UserRecord) -> Result<Option<Vec<u8>>> {
         self.decrypt_optional(user.metadata.as_ref())
     }
@@ -376,6 +394,17 @@ mod tests {
         let (svc, _guard) = build_service("invalid-token", [3u8; 32]);
         svc.create_user("user", "pass").unwrap();
         assert!(svc.authenticate_api_key("invalid").unwrap().is_none());
+    }
+
+    #[test]
+    fn revoke_api_key_removes_record() {
+        let (svc, _guard) = build_service("revoke-key", [7u8; 32]);
+        let user = svc.create_user("user", "secret").unwrap();
+        let (record, token) = svc.create_api_key(&user.user_id, Some("session")).unwrap();
+        assert!(svc.authenticate_api_key(&token).unwrap().is_some());
+        assert!(svc.revoke_api_key(&record.key_id).unwrap());
+        assert!(svc.authenticate_api_key(&token).unwrap().is_none());
+        assert!(!svc.revoke_api_key(&record.key_id).unwrap());
     }
 
     #[test]

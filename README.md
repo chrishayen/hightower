@@ -87,6 +87,9 @@ fn bootstrap_auth() -> hightower_kv::Result<()> {
         .authenticate_api_key(&token)?
         .expect("token should resolve");
     println!("token resolves to user {}", hydrated.owner_id);
+
+    auth.revoke_api_key(&record.key_id)?;
+    assert!(auth.authenticate_api_key(&token)?.is_none());
     Ok(())
 }
 ```
