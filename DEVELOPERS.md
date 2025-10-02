@@ -108,8 +108,8 @@ should hook in.
 
 ## Contributing Checklist
 
-1. Update `PLAN.md` and README when introducing new capabilities or completing
-   milestones.
+1. Update README and developer documentation when introducing new capabilities
+   or completing milestones.
 2. Ensure `cargo fmt` and `cargo test` pass locally.
 3. Provide developer-facing documentation for new extension points here or in
    module-level comments.
