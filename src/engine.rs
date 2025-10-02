@@ -1,14 +1,16 @@
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded, unbounded};
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 
 use crate::command::Command;
 use crate::compactor::{CompactionConfig, Compactor};
 use crate::config::StoreConfig;
 use crate::error::{Error, Result};
 use crate::id_generator::IdGenerator;
-use crate::state::{ApplyOutcome, KvState};
+use crate::state::{ApplyOutcome, ConcurrentKvState, KvState};
 use crate::storage::Storage;
 
 pub trait KvEngine: Send + Sync {
@@ -32,13 +34,146 @@ pub trait SnapshotEngine {
 }
 
 #[derive(Debug)]
-pub struct SingleNodeEngine {
+struct EngineShared {
     storage: Arc<Storage>,
-    state: RwLock<KvState>,
+    state: Arc<ConcurrentKvState>,
     version_gen: IdGenerator,
     compactor: Compactor,
     compaction_interval: Duration,
     last_compaction: Mutex<Instant>,
+}
+
+impl EngineShared {
+    fn new(
+        storage: Arc<Storage>,
+        state: Arc<ConcurrentKvState>,
+        version_gen: IdGenerator,
+        compactor: Compactor,
+        compaction_interval: Duration,
+    ) -> Self {
+        Self {
+            storage,
+            state,
+            version_gen,
+            compactor,
+            compaction_interval,
+            last_compaction: Mutex::new(Instant::now()),
+        }
+    }
+
+    fn next_version(&self) -> u64 {
+        self.version_gen.next()
+    }
+
+    fn len(&self) -> usize {
+        self.state.len()
+    }
+
+    fn read_with<F, R>(&self, reader: F) -> R
+    where
+        F: FnOnce(&KvState) -> R,
+    {
+        self.state.read_with(reader)
+    }
+
+    fn apply_single(&self, command: Command) -> Result<ApplyOutcome> {
+        let mut guard = self.state.lock_entry(command.key());
+        let outcome = guard.evaluate(&command);
+        let result = match outcome {
+            ApplyOutcome::Applied | ApplyOutcome::Removed => {
+                self.storage.apply(&command)?;
+                let applied = guard.apply(&command);
+                debug_assert!(matches!(
+                    applied,
+                    ApplyOutcome::Applied | ApplyOutcome::Removed
+                ));
+                Ok(applied)
+            }
+            ApplyOutcome::IgnoredStale => Ok(ApplyOutcome::IgnoredStale),
+        };
+
+        let mutated = matches!(result, Ok(ApplyOutcome::Applied | ApplyOutcome::Removed));
+        drop(guard);
+        if mutated {
+            self.maybe_run_compaction()?;
+        }
+        result
+    }
+
+    fn apply_batch(&self, commands: Vec<Command>) -> Result<Vec<ApplyOutcome>> {
+        let mut outcomes = Vec::with_capacity(commands.len());
+        let mut mutated = false;
+
+        for command in commands {
+            let mut guard = self.state.lock_entry(command.key());
+            let outcome = guard.evaluate(&command);
+            match outcome {
+                ApplyOutcome::Applied | ApplyOutcome::Removed => {
+                    self.storage.apply(&command)?;
+                    let applied = guard.apply(&command);
+                    debug_assert!(matches!(
+                        applied,
+                        ApplyOutcome::Applied | ApplyOutcome::Removed
+                    ));
+                    if matches!(applied, ApplyOutcome::Applied | ApplyOutcome::Removed) {
+                        mutated = true;
+                    }
+                    outcomes.push(applied);
+                }
+                ApplyOutcome::IgnoredStale => outcomes.push(ApplyOutcome::IgnoredStale),
+            }
+        }
+
+        if mutated {
+            self.maybe_run_compaction()?;
+        }
+
+        Ok(outcomes)
+    }
+
+    fn maybe_run_compaction(&self) -> Result<()> {
+        if self.compaction_interval.is_zero() {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        {
+            let last = self.last_compaction.lock();
+            if now.duration_since(*last) < self.compaction_interval {
+                return Ok(());
+            }
+        }
+
+        self.compactor.run_once()?;
+        *self.last_compaction.lock() = now;
+        Ok(())
+    }
+
+    fn run_compaction_now(&self) -> Result<()> {
+        self.compactor.run_once()?;
+        *self.last_compaction.lock() = Instant::now();
+        Ok(())
+    }
+}
+
+enum WorkItem {
+    Command {
+        command: Command,
+        responder: Sender<Result<ApplyOutcome>>,
+    },
+    Batch {
+        commands: Vec<Command>,
+        responder: Sender<Result<Vec<ApplyOutcome>>>,
+    },
+}
+
+#[derive(Debug)]
+pub struct SingleNodeEngine {
+    shared: Arc<EngineShared>,
+    dispatcher: Option<Sender<WorkItem>>,
+    workers: Vec<JoinHandle<()>>,
+    compaction_signal: Option<Sender<()>>,
+    compaction_worker: Option<JoinHandle<()>>,
 }
 
 impl SingleNodeEngine {
@@ -47,6 +182,7 @@ impl SingleNodeEngine {
     }
 
     pub fn with_config(config: StoreConfig) -> Result<Self> {
+        let worker_threads = config.worker_threads;
         let storage = Arc::new(Storage::new(&config)?);
         let (mut state, mut max_version) = match storage.load_snapshot()? {
             Some((state, version)) => (state, version),
@@ -68,19 +204,40 @@ impl SingleNodeEngine {
             ..CompactionConfig::default()
         };
         let compactor = Compactor::new(Arc::clone(&storage), compactor_config);
-        let last_compaction = Mutex::new(Instant::now());
-        Ok(Self {
+
+        let concurrent_state = Arc::new(ConcurrentKvState::from(state));
+
+        let shared = Arc::new(EngineShared::new(
             storage,
-            state: RwLock::new(state),
-            version_gen: IdGenerator::new(start_version.max(1)),
+            Arc::clone(&concurrent_state),
+            IdGenerator::new(start_version.max(1)),
             compactor,
-            compaction_interval: config.compaction_interval,
-            last_compaction,
+            config.compaction_interval,
+        ));
+
+        let (dispatcher, workers) = if worker_threads == 0 {
+            (None, Vec::new())
+        } else {
+            let (task_tx, task_rx) = unbounded::<WorkItem>();
+            let workers = spawn_workers(worker_threads, Arc::clone(&shared), task_rx);
+            (Some(task_tx), workers)
+        };
+
+        let (shutdown_tx, shutdown_rx) = unbounded::<()>();
+        let compaction_worker = spawn_compaction_worker(Arc::clone(&shared), shutdown_rx);
+        let compaction_signal = compaction_worker.as_ref().map(|_| shutdown_tx);
+
+        Ok(Self {
+            shared,
+            dispatcher,
+            workers,
+            compaction_signal,
+            compaction_worker,
         })
     }
 
     fn next_version(&self) -> u64 {
-        self.version_gen.next()
+        self.shared.next_version()
     }
 
     pub fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<ApplyOutcome> {
@@ -91,7 +248,7 @@ impl SingleNodeEngine {
             version,
             timestamp: current_timestamp(),
         };
-        self.submit(command)
+        self.dispatch_command(command)
     }
 
     pub fn delete(&self, key: Vec<u8>) -> Result<ApplyOutcome> {
@@ -101,136 +258,128 @@ impl SingleNodeEngine {
             version,
             timestamp: current_timestamp(),
         };
-        self.submit(command)
+        self.dispatch_command(command)
     }
 
     pub fn len(&self) -> usize {
-        self.state.read().len()
+        self.shared.len()
     }
 
     pub fn flush(&self) -> Result<()> {
-        self.storage.sync()
+        self.shared.storage.sync()
     }
 
     pub fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: IntoIterator<Item = Command>,
     {
-        self.submit_batch_inner(commands.into_iter())
+        let collected: Vec<Command> = commands.into_iter().collect();
+        self.dispatch_batch(collected)
     }
 
     pub fn read_with<F, R>(&self, reader: F) -> R
     where
         F: FnOnce(&KvState) -> R,
     {
-        let guard = self.state.read();
-        reader(&guard)
+        self.shared.read_with(reader)
     }
 
     pub fn run_compaction_now(&self) -> Result<()> {
-        self.compactor.run_once()?;
-        *self.last_compaction.lock() = Instant::now();
-        Ok(())
+        self.shared.run_compaction_now()
     }
 
-    fn submit_batch_inner<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
-    where
-        I: Iterator<Item = Command>,
-    {
-        let mut state_guard = self.state.write();
-        let mut outcomes = Vec::new();
-        let mut pending: Vec<(usize, Command)> = Vec::new();
-        let mut mutated = false;
-
-        for command in commands {
-            let outcome = state_guard.evaluate(&command);
-            match outcome {
-                ApplyOutcome::Applied | ApplyOutcome::Removed => {
-                    let index = outcomes.len();
-                    outcomes.push(outcome);
-                    pending.push((index, command));
-                    mutated = true;
-                }
-                ApplyOutcome::IgnoredStale => {
-                    outcomes.push(ApplyOutcome::IgnoredStale);
-                }
-            }
+    fn dispatch_command(&self, command: Command) -> Result<ApplyOutcome> {
+        if let Some(dispatcher) = &self.dispatcher {
+            let (tx, rx) = bounded(1);
+            dispatcher
+                .send(WorkItem::Command {
+                    command,
+                    responder: tx,
+                })
+                .map_err(|_| Error::Invariant("engine dispatcher unavailable"))?;
+            rx.recv()
+                .map_err(|_| Error::Invariant("engine worker terminated"))?
+        } else {
+            self.shared.apply_single(command)
         }
-
-        for (index, command) in pending {
-            self.storage.apply(&command)?;
-            let applied = state_guard.apply(&command);
-            debug_assert_eq!(applied, outcomes[index]);
-        }
-
-        drop(state_guard);
-        if mutated {
-            self.maybe_run_compaction()?;
-        }
-
-        Ok(outcomes)
     }
 
-    fn maybe_run_compaction(&self) -> Result<()> {
-        if self.compaction_interval == Duration::from_secs(0) {
-            return Ok(());
+    fn dispatch_batch(&self, commands: Vec<Command>) -> Result<Vec<ApplyOutcome>> {
+        if let Some(dispatcher) = &self.dispatcher {
+            let (tx, rx) = bounded(1);
+            dispatcher
+                .send(WorkItem::Batch {
+                    commands,
+                    responder: tx,
+                })
+                .map_err(|_| Error::Invariant("engine dispatcher unavailable"))?;
+            rx.recv()
+                .map_err(|_| Error::Invariant("engine worker terminated"))?
+        } else {
+            self.shared.apply_batch(commands)
         }
-        let now = Instant::now();
-        {
-            let last = self.last_compaction.lock();
-            if now.duration_since(*last) < self.compaction_interval {
-                return Ok(());
-            }
+    }
+    #[cfg(test)]
+    pub(crate) fn test_next_version(&self) -> u64 {
+        self.next_version()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn storage_for_test(&self) -> Arc<Storage> {
+        Arc::clone(&self.shared.storage)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_state_for_test(&self) {
+        self.shared.state.clear_for_test()
+    }
+}
+
+impl Drop for SingleNodeEngine {
+    fn drop(&mut self) {
+        if let Some(dispatcher) = self.dispatcher.take() {
+            drop(dispatcher);
         }
-        self.compactor.run_once()?;
-        *self.last_compaction.lock() = now;
-        Ok(())
+
+        for handle in self.workers.drain(..) {
+            let _ = handle.join();
+        }
+
+        if let Some(signal) = self.compaction_signal.take() {
+            let _ = signal.send(());
+        }
+
+        if let Some(handle) = self.compaction_worker.take() {
+            let _ = handle.join();
+        }
     }
 }
 
 impl KvEngine for SingleNodeEngine {
     fn submit(&self, command: Command) -> Result<ApplyOutcome> {
-        let mut guard = self.state.write();
-        let outcome = guard.evaluate(&command);
-        let result = match outcome {
-            ApplyOutcome::Applied | ApplyOutcome::Removed => {
-                self.storage.apply(&command)?;
-                let applied = guard.apply(&command);
-                debug_assert!(matches!(
-                    applied,
-                    ApplyOutcome::Applied | ApplyOutcome::Removed
-                ));
-                Ok(applied)
-            }
-            ApplyOutcome::IgnoredStale => Ok(ApplyOutcome::IgnoredStale),
-        };
-        let mutated = matches!(result, Ok(ApplyOutcome::Applied | ApplyOutcome::Removed));
-        drop(guard);
-        if mutated {
-            self.maybe_run_compaction()?;
-        }
-        result
+        self.dispatch_command(command)
     }
 
     fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: IntoIterator<Item = Command>,
     {
-        self.submit_batch_inner(commands.into_iter())
+        let collected: Vec<Command> = commands.into_iter().collect();
+        self.dispatch_batch(collected)
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        if let Some(value) = self.state.read().get(key) {
-            return Ok(Some(value.to_vec()));
+        if let Some(value) = self.shared.state.get(key) {
+            return Ok(Some(value));
         }
 
-        let entry = match self.storage.lookup(key) {
+        let entry = match self.shared.storage.lookup(key) {
             Some(entry) => entry,
             None => return Ok(None),
         };
 
         if entry.is_tombstone {
-            let mut guard = self.state.write();
+            let mut guard = self.shared.state.lock_entry(key);
             guard.apply(&Command::Delete {
                 key: key.to_vec(),
                 version: entry.version,
@@ -239,34 +388,34 @@ impl KvEngine for SingleNodeEngine {
             return Ok(None);
         }
 
-        let command = match self.storage.fetch_command(&entry)? {
+        let command = match self.shared.storage.fetch_command(&entry)? {
             Some(command) => command,
             None => return Ok(None),
         };
 
         let command_timestamp = command.timestamp();
-        match command {
+        match &command {
             Command::Set {
                 key,
                 value,
                 version,
                 ..
             } => {
-                let mut guard = self.state.write();
+                let mut guard = self.shared.state.lock_entry(key);
                 let cloned_value = value.clone();
                 guard.apply(&Command::Set {
                     key: key.clone(),
-                    value,
-                    version,
+                    value: value.clone(),
+                    version: *version,
                     timestamp: command_timestamp,
                 });
                 Ok(Some(cloned_value))
             }
             Command::Delete { key, version, .. } => {
-                let mut guard = self.state.write();
+                let mut guard = self.shared.state.lock_entry(key);
                 guard.apply(&Command::Delete {
-                    key,
-                    version,
+                    key: key.clone(),
+                    version: *version,
                     timestamp: command_timestamp,
                 });
                 Ok(None)
@@ -277,12 +426,76 @@ impl KvEngine for SingleNodeEngine {
 
 impl SnapshotEngine for SingleNodeEngine {
     fn snapshot_state(&self) -> KvState {
-        self.storage.state_snapshot()
+        self.shared.storage.state_snapshot()
     }
 
     fn latest_version(&self) -> u64 {
-        self.storage.latest_version()
+        self.shared.storage.latest_version()
     }
+}
+
+fn spawn_workers(
+    count: usize,
+    shared: Arc<EngineShared>,
+    task_rx: Receiver<WorkItem>,
+) -> Vec<JoinHandle<()>> {
+    let count = count.max(1);
+    let mut handles = Vec::with_capacity(count);
+    for index in 0..count {
+        let worker_rx = task_rx.clone();
+        let worker_shared = Arc::clone(&shared);
+        let handle = thread::Builder::new()
+            .name(format!("hightower-engine-worker-{index}"))
+            .spawn(move || worker_loop(worker_shared, worker_rx))
+            .expect("failed to spawn engine worker");
+        handles.push(handle);
+    }
+    drop(task_rx);
+    handles
+}
+
+fn worker_loop(shared: Arc<EngineShared>, task_rx: Receiver<WorkItem>) {
+    while let Ok(item) = task_rx.recv() {
+        match item {
+            WorkItem::Command { command, responder } => {
+                let result = shared.apply_single(command);
+                let _ = responder.send(result);
+            }
+            WorkItem::Batch {
+                commands,
+                responder,
+            } => {
+                let result = shared.apply_batch(commands);
+                let _ = responder.send(result);
+            }
+        }
+    }
+}
+
+fn spawn_compaction_worker(
+    shared: Arc<EngineShared>,
+    shutdown: Receiver<()>,
+) -> Option<JoinHandle<()>> {
+    if shared.compaction_interval.is_zero() {
+        return None;
+    }
+
+    let interval = shared.compaction_interval;
+    Some(
+        thread::Builder::new()
+            .name("hightower-compactor".into())
+            .spawn(move || {
+                loop {
+                    match shutdown.recv_timeout(interval) {
+                        Ok(_) | Err(RecvTimeoutError::Disconnected) => break,
+                        Err(RecvTimeoutError::Timeout) => {
+                            let _ = shared.maybe_run_compaction();
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn compaction worker"),
+    )
 }
 
 fn current_timestamp() -> i64 {
@@ -295,12 +508,15 @@ fn current_timestamp() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::thread;
     use std::time::Duration;
     use tempfile::tempdir;
 
     fn temp_config(dir: &std::path::Path) -> StoreConfig {
         let mut cfg = StoreConfig::default();
         cfg.data_dir = dir.join("engine-data").to_string_lossy().into_owned();
+        cfg.worker_threads = 2;
         cfg
     }
 
@@ -345,10 +561,7 @@ mod tests {
         let engine = SingleNodeEngine::with_config(cfg).unwrap();
         engine.put(b"alpha".to_vec(), b"beta".to_vec()).unwrap();
 
-        {
-            let mut guard = engine.state.write();
-            guard.clear_for_test();
-        }
+        engine.clear_state_for_test();
 
         let fetched = engine.get(b"alpha").unwrap();
         assert_eq!(fetched, Some(b"beta".to_vec()));
@@ -374,13 +587,13 @@ mod tests {
             Command::Set {
                 key: b"a".to_vec(),
                 value: b"1".to_vec(),
-                version: engine.version_gen.next(),
+                version: engine.test_next_version(),
                 timestamp: 1,
             },
             Command::Set {
                 key: b"b".to_vec(),
                 value: b"2".to_vec(),
-                version: engine.version_gen.next(),
+                version: engine.test_next_version(),
                 timestamp: 2,
             },
         ];
@@ -411,7 +624,7 @@ mod tests {
         let fresh = Command::Set {
             key: b"k".to_vec(),
             value: b"v2".to_vec(),
-            version: engine.version_gen.next(),
+            version: engine.test_next_version(),
             timestamp: 11,
         };
 
@@ -453,12 +666,14 @@ mod tests {
                 .unwrap();
         }
 
-        let sealed_before = engine.storage.sealed_segments_snapshot();
+        let storage_before = engine.storage_for_test();
+        let sealed_before = storage_before.sealed_segments_snapshot();
         assert!(sealed_before.len() >= 1);
 
         engine.run_compaction_now().unwrap();
 
-        let sealed_after = engine.storage.sealed_segments_snapshot();
+        let storage_after = engine.storage_for_test();
+        let sealed_after = storage_after.sealed_segments_snapshot();
         assert!(sealed_after.len() <= sealed_before.len());
 
         let snapshot_path = std::path::Path::new(&cfg.data_dir).join("snapshot.bin");
@@ -468,5 +683,38 @@ mod tests {
 
         let reopened = SingleNodeEngine::with_config(cfg).unwrap();
         assert!(reopened.get(b"key0").unwrap().is_some());
+    }
+
+    #[test]
+    fn concurrent_submitters_share_workers() {
+        let temp = tempdir().unwrap();
+        let mut cfg = temp_config(temp.path());
+        cfg.compaction_interval = Duration::from_secs(0);
+        let engine = Arc::new(SingleNodeEngine::with_config(cfg).unwrap());
+
+        let threads: Vec<_> = (0..4)
+            .map(|worker| {
+                let engine = Arc::clone(&engine);
+                thread::spawn(move || {
+                    for idx in 0..25 {
+                        let key = format!("k-{worker}-{idx}").into_bytes();
+                        let value = format!("v-{worker}-{idx}").into_bytes();
+                        engine.put(key, value).unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for handle in threads {
+            handle.join().unwrap();
+        }
+
+        for worker in 0..4 {
+            for idx in 0..25 {
+                let key = format!("k-{worker}-{idx}").into_bytes();
+                let expected = format!("v-{worker}-{idx}").into_bytes();
+                assert_eq!(engine.get(&key).unwrap(), Some(expected));
+            }
+        }
     }
 }
