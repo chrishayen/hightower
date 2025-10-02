@@ -15,6 +15,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - In-memory hash index for hot keys backed by sparse on-disk segment metadata (including Bloom filters) for cold lookups.
 - Copy-on-write rebuild of the index during compaction to avoid blocking reads/writes.
 - Snapshot support (`serialize_snapshot` / `restore_snapshot`) so recovery avoids replaying the entire log.
+- Single-node deployments schedule compaction opportunistically after batches and can be forced via `run_compaction_now`, automatically emitting snapshots when enabled.
 
 ### Command & State Machine
 - `Command` enum captures set/delete/batch operations. Each command applies deterministically to the `KvState` state machine.
@@ -41,6 +42,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 
 ### Configuration & Telemetry
 - Central `config.rs` defines storage paths, compaction thresholds, flush cadence, auth crypto settings.
+- `StoreConfig::emit_snapshot_after_compaction` controls whether scheduled compaction writes a fresh snapshot.
 - `metrics.rs` provides hooks for counters/timers so operational visibility stays consistent when clustering arrives.
 
 ## File Layout

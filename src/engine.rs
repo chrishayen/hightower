@@ -1,8 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use crate::command::Command;
+use crate::compactor::{CompactionConfig, Compactor};
 use crate::config::StoreConfig;
 use crate::error::{Error, Result};
 use crate::id_generator::IdGenerator;
@@ -26,9 +28,12 @@ pub trait KvEngine: Send + Sync {
 
 #[derive(Debug)]
 pub struct SingleNodeEngine {
-    storage: Storage,
+    storage: Arc<Storage>,
     state: RwLock<KvState>,
     version_gen: IdGenerator,
+    compactor: Compactor,
+    compaction_interval: Duration,
+    last_compaction: Mutex<Instant>,
 }
 
 impl SingleNodeEngine {
@@ -37,7 +42,7 @@ impl SingleNodeEngine {
     }
 
     pub fn with_config(config: StoreConfig) -> Result<Self> {
-        let storage = Storage::new(&config)?;
+        let storage = Arc::new(Storage::new(&config)?);
         let (mut state, mut max_version) = match storage.load_snapshot()? {
             Some((state, version)) => (state, version),
             None => (KvState::new(), 0u64),
@@ -52,10 +57,20 @@ impl SingleNodeEngine {
         let start_version = max_version
             .checked_add(1)
             .ok_or(Error::Unimplemented("engine::version_overflow"))?;
+        let compactor_config = CompactionConfig {
+            min_bytes: config.max_segment_size,
+            emit_snapshot: config.emit_snapshot_after_compaction,
+            ..CompactionConfig::default()
+        };
+        let compactor = Compactor::new(Arc::clone(&storage), compactor_config);
+        let last_compaction = Mutex::new(Instant::now());
         Ok(Self {
             storage,
             state: RwLock::new(state),
             version_gen: IdGenerator::new(start_version.max(1)),
+            compactor,
+            compaction_interval: config.compaction_interval,
+            last_compaction,
         })
     }
 
@@ -107,6 +122,12 @@ impl SingleNodeEngine {
         reader(&guard)
     }
 
+    pub fn run_compaction_now(&self) -> Result<()> {
+        self.compactor.run_once()?;
+        *self.last_compaction.lock() = Instant::now();
+        Ok(())
+    }
+
     fn submit_batch_inner<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: Iterator<Item = Command>,
@@ -114,6 +135,7 @@ impl SingleNodeEngine {
         let mut state_guard = self.state.write();
         let mut outcomes = Vec::new();
         let mut pending: Vec<(usize, Command)> = Vec::new();
+        let mut mutated = false;
 
         for command in commands {
             let outcome = state_guard.evaluate(&command);
@@ -122,6 +144,7 @@ impl SingleNodeEngine {
                     let index = outcomes.len();
                     outcomes.push(outcome);
                     pending.push((index, command));
+                    mutated = true;
                 }
                 ApplyOutcome::IgnoredStale => {
                     outcomes.push(ApplyOutcome::IgnoredStale);
@@ -135,7 +158,28 @@ impl SingleNodeEngine {
             debug_assert_eq!(applied, outcomes[index]);
         }
 
+        drop(state_guard);
+        if mutated {
+            self.maybe_run_compaction()?;
+        }
+
         Ok(outcomes)
+    }
+
+    fn maybe_run_compaction(&self) -> Result<()> {
+        if self.compaction_interval == Duration::from_secs(0) {
+            return Ok(());
+        }
+        let now = Instant::now();
+        {
+            let last = self.last_compaction.lock();
+            if now.duration_since(*last) < self.compaction_interval {
+                return Ok(());
+            }
+        }
+        self.compactor.run_once()?;
+        *self.last_compaction.lock() = now;
+        Ok(())
     }
 }
 
@@ -143,7 +187,7 @@ impl KvEngine for SingleNodeEngine {
     fn submit(&self, command: Command) -> Result<ApplyOutcome> {
         let mut guard = self.state.write();
         let outcome = guard.evaluate(&command);
-        match outcome {
+        let result = match outcome {
             ApplyOutcome::Applied | ApplyOutcome::Removed => {
                 self.storage.apply(&command)?;
                 let applied = guard.apply(&command);
@@ -154,7 +198,13 @@ impl KvEngine for SingleNodeEngine {
                 Ok(applied)
             }
             ApplyOutcome::IgnoredStale => Ok(ApplyOutcome::IgnoredStale),
+        };
+        let mutated = matches!(result, Ok(ApplyOutcome::Applied | ApplyOutcome::Removed));
+        drop(guard);
+        if mutated {
+            self.maybe_run_compaction()?;
         }
+        result
     }
 
     fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
@@ -230,6 +280,7 @@ fn current_timestamp() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn temp_config(dir: &std::path::Path) -> StoreConfig {
@@ -370,5 +421,37 @@ mod tests {
         });
 
         assert_eq!(snapshot, b"value".to_vec());
+    }
+
+    #[test]
+    fn run_compaction_now_merges_segments_and_creates_snapshot() {
+        let temp = tempdir().unwrap();
+        let mut cfg = temp_config(temp.path());
+        cfg.max_segment_size = 64;
+        cfg.compaction_interval = Duration::from_secs(0);
+        cfg.emit_snapshot_after_compaction = true;
+        let engine = SingleNodeEngine::with_config(cfg.clone()).unwrap();
+
+        for i in 0..6 {
+            engine
+                .put(format!("key{i}").into_bytes(), vec![b'x'; 16])
+                .unwrap();
+        }
+
+        let sealed_before = engine.storage.sealed_segments_snapshot();
+        assert!(sealed_before.len() >= 1);
+
+        engine.run_compaction_now().unwrap();
+
+        let sealed_after = engine.storage.sealed_segments_snapshot();
+        assert!(sealed_after.len() <= sealed_before.len());
+
+        let snapshot_path = std::path::Path::new(&cfg.data_dir).join("snapshot.bin");
+        assert!(snapshot_path.exists());
+
+        drop(engine);
+
+        let reopened = SingleNodeEngine::with_config(cfg).unwrap();
+        assert!(reopened.get(b"key0").unwrap().is_some());
     }
 }

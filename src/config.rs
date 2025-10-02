@@ -6,6 +6,7 @@ pub struct StoreConfig {
     pub max_segment_size: u64,
     pub compaction_interval: Duration,
     pub fsync_interval: Duration,
+    pub emit_snapshot_after_compaction: bool,
 }
 
 impl Default for StoreConfig {
@@ -15,6 +16,7 @@ impl Default for StoreConfig {
             max_segment_size: 64 * 1024 * 1024,
             compaction_interval: Duration::from_secs(60),
             fsync_interval: Duration::from_millis(25),
+            emit_snapshot_after_compaction: true,
         }
     }
 }
@@ -30,5 +32,6 @@ mod tests {
         assert!(cfg.max_segment_size >= 4 * 1024 * 1024);
         assert!(cfg.compaction_interval >= Duration::from_secs(1));
         assert!(cfg.fsync_interval <= Duration::from_millis(100));
+        assert!(cfg.emit_snapshot_after_compaction);
     }
 }

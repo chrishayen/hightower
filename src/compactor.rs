@@ -37,7 +37,7 @@ impl Default for CompactionConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Compactor {
     storage: Arc<Storage>,
     config: CompactionConfig,

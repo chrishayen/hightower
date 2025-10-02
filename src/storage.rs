@@ -277,7 +277,7 @@ fn parse_segment_id(name: &str) -> Option<u64> {
 }
 
 fn rebuild_index(segments: &[Arc<LogSegment>]) -> Result<Index> {
-    let mut index = Index::new();
+    let mut builder = crate::index::IndexBuilder::new();
     let mut ordered_segments = segments.to_vec();
     ordered_segments.sort_by_key(|segment| segment.id());
 
@@ -292,12 +292,12 @@ fn rebuild_index(segments: &[Arc<LogSegment>]) -> Result<Index> {
                 version: command.version(),
                 is_tombstone: matches!(command, Command::Delete { .. }),
             };
-            index.upsert(key, entry);
+            builder.insert(key, entry);
             Ok(())
         })?;
     }
 
-    Ok(index)
+    Ok(Index::rebuild(builder))
 }
 
 fn normalized_item_estimate(max_segment_size: u64) -> usize {
@@ -360,14 +360,14 @@ impl<'a> SuspendedCompaction<'a> {
             sealed_ids,
         } = self;
 
-        let index_snapshot = storage.index.read();
+        let snapshot = storage.index.read().snapshot();
         let mut latest_versions: HashMap<Vec<u8>, IndexEntry> = HashMap::new();
-        for (key, entry) in index_snapshot.iter() {
+        for (key, entry) in snapshot.iter() {
             if sealed_ids.contains(&entry.segment_id) {
                 latest_versions.insert(key.clone(), entry.clone());
             }
         }
-        drop(index_snapshot);
+        drop(snapshot);
 
         if latest_versions.is_empty() {
             return Ok(false);
