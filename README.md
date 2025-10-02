@@ -145,7 +145,14 @@ Additional runnable samples live under `examples/`:
 
 ### Benchmark Summary
 Criterion benchmarks (`cargo bench`) measured on a single core, using tempdir
-storage with snapshot emission enabled:
+storage with snapshot emission enabled. Host machine specs:
+
+- Intel Core Ultra 7 265F (20 cores / 20 threads, up to 6.5 GHz boost)
+- 128 GiB system memory
+- Linux 6.16.8-arch3-1 (Arch Linux)
+- Bench data directory on local NVMe SSD
+
+Results:
 
 | Scenario | Payload | Throughput |
 |----------|---------|------------|
