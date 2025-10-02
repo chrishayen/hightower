@@ -46,6 +46,12 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - `StoreConfig::emit_snapshot_after_compaction` controls whether scheduled compaction writes a fresh snapshot.
 - `metrics.rs` provides hooks for counters/timers so operational visibility stays consistent when clustering arrives.
 
+### Tooling & Guides
+- `htkvctl` (in `src/bin/htkvctl.rs`) offers basic maintenance commands for manual
+  compaction, segment inspection, and listing auth users.
+- `DEVELOPERS.md` documents storage/auth/replication extension points for
+  contributors building on the engine.
+
 ## File Layout
 Each logical component lives in its own file in a flat module structure:
 - `lib.rs` – module declarations and re-exports.

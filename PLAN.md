@@ -53,5 +53,5 @@
 - [x] Build AuthService with secondary indexes.
 - [x] Write unit/component/integration tests for storage, engine, and auth.
 - [x] Flesh out replication traits and single-node adapter.
-- [ ] Document extension points and developer guidance.
-- [ ] Add tooling/CLI utilities for debugging and inspection.
+- [x] Document extension points and developer guidance.
+- [x] Add tooling/CLI utilities for debugging and inspection.
