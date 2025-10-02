@@ -26,6 +26,11 @@ pub trait KvEngine: Send + Sync {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 }
 
+pub trait SnapshotEngine {
+    fn snapshot_state(&self) -> KvState;
+    fn latest_version(&self) -> u64;
+}
+
 #[derive(Debug)]
 pub struct SingleNodeEngine {
     storage: Arc<Storage>,
@@ -267,6 +272,16 @@ impl KvEngine for SingleNodeEngine {
                 Ok(None)
             }
         }
+    }
+}
+
+impl SnapshotEngine for SingleNodeEngine {
+    fn snapshot_state(&self) -> KvState {
+        self.storage.state_snapshot()
+    }
+
+    fn latest_version(&self) -> u64 {
+        self.storage.latest_version()
     }
 }
 

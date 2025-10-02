@@ -27,6 +27,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 - Define neutral traits (`CommandSubmitter`, `SnapshotProvider`) under `replication.rs` that the single-node engine fulfills trivially.
 - Plan to swap in a Raft (or similar) implementation without changing storage or higher layers by conforming to these traits.
 - Reads currently execute locally; future leader-leases/read-index checks can plug into the existing read context abstraction.
+- `LocalReplication` wraps the single-node engine today, forwarding submit/batch calls and providing snapshot state for downstream consensus modules.
 
 ### Indexing Strategy
 - Primary in-memory map: `key -> (segment_id, offset, length, version)` with configurable load factor.
