@@ -14,7 +14,7 @@ Hightower KV is a lightweight, embedded key-value store designed for nodes in a 
 Add `hightower-kv` as a dependency and spin up a `SingleNodeEngine`:
 
 ```rust
-use hightower_kv::{SingleNodeEngine, StoreConfig};
+use hightower_kv::{KvEngine, SingleNodeEngine, StoreConfig};
 
 fn main() -> hightower_kv::Result<()> {
     // Persist data under ./kv-data and fan writes across four worker threads.
@@ -23,11 +23,22 @@ fn main() -> hightower_kv::Result<()> {
     config.worker_threads = 4;
 
     let engine = SingleNodeEngine::with_config(config)?;
+    // Create
     engine.put(b"alpha".to_vec(), b"bravo".to_vec())?;
+    engine.put(b"charlie".to_vec(), b"delta".to_vec())?;
 
-    if let Some(bytes) = engine.get(b"alpha")? {
-        println!("alpha => {}", String::from_utf8_lossy(&bytes));
-    }
+    // Read
+    let alpha = engine.get(b"alpha")?.expect("alpha should exist");
+    println!("alpha => {}", String::from_utf8_lossy(&alpha));
+
+    // Update
+    engine.put(b"alpha".to_vec(), b"echo".to_vec())?;
+    let alpha_updated = engine.get(b"alpha")?.expect("alpha should still exist");
+    println!("alpha (updated) => {}", String::from_utf8_lossy(&alpha_updated));
+
+    // Delete
+    engine.delete(b"charlie".to_vec())?;
+    assert!(engine.get(b"charlie")?.is_none());
 
     engine.flush()?;
     Ok(())
@@ -52,8 +63,30 @@ fn bootstrap_auth() -> hightower_kv::Result<()> {
     let encryptor = AesGcmEncryptor::new([0u8; 32]);
     let auth = AuthService::new(engine, hasher, encryptor);
 
-    let user = auth.create_user("captain", "it-doesnt-take-much")?;
+    let user = auth.create_user_with_metadata(
+        "captain",
+        "it-doesnt-take-much",
+        Some(b"{\"role\":\"ops\"}".as_slice()),
+    )?;
     println!("created user {}", user.user_id);
+
+    // Password verification and metadata decryption
+    assert!(auth.verify_password("captain", "it-doesnt-take-much")?);
+    let metadata = auth
+        .decrypt_user_metadata(&user)?
+        .unwrap_or_default();
+    println!(
+        "user metadata => {}",
+        String::from_utf8_lossy(&metadata)
+    );
+
+    // API key issuance and validation
+    let (record, token) = auth.create_api_key(&user.user_id, None)?;
+    println!("issued key {}", record.key_id);
+    let hydrated = auth
+        .authenticate_api_key(&token)?
+        .expect("token should resolve");
+    println!("token resolves to user {}", hydrated.owner_id);
     Ok(())
 }
 ```

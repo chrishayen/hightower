@@ -2,6 +2,13 @@
 name = "hightower-kv"
 version = "0.1.0"
 edition = "2024"
+authors = ["Chris Hayen"]
+license = "MIT"
+description = "Embedded log-structured key-value store with optional auth helpers"
+readme = "README.md"
+repository = "https://github.com/chrishayen/hightower-kv"
+keywords = ["kv", "storage", "embedded", "log-structured"]
+categories = ["database", "data-structures"]
 
 [dependencies]
 hashbrown = "0.14"
