@@ -19,7 +19,7 @@ fn engine_round_trip_integration() {
 }
 
 #[test]
-fn auth_service_currently_unimplemented() {
+fn auth_service_round_trip() {
     let temp = tempdir().unwrap();
     let mut cfg = StoreConfig::default();
     cfg.data_dir = temp.path().join("auth-int").to_string_lossy().into_owned();
@@ -29,9 +29,11 @@ fn auth_service_currently_unimplemented() {
         Argon2SecretHasher::default(),
         AesGcmEncryptor::new([0u8; 32]),
     );
-    let err = service.create_user("alice", "password").unwrap_err();
-    assert!(matches!(
-        err,
-        crate::error::Error::Unimplemented("auth_service::create_user")
-    ));
+    let user = service.create_user("alice", "password").unwrap();
+    assert!(service.verify_password("alice", "password").unwrap());
+    let (_, token) = service
+        .create_api_key(&user.user_id, Some("default"))
+        .unwrap();
+    let authenticated = service.authenticate_api_key(&token).unwrap();
+    assert!(authenticated.is_some());
 }

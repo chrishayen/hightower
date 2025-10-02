@@ -19,7 +19,7 @@ pub struct UserRecord {
 impl UserRecord {
     pub fn validate(&self) -> Result<()> {
         if self.username.trim().is_empty() {
-            return Err(Error::Crypto("username cannot be empty".into()));
+            return Err(Error::Validation("username cannot be empty"));
         }
         Ok(())
     }
@@ -39,7 +39,7 @@ pub struct ApiKeyRecord {
 impl ApiKeyRecord {
     pub fn validate(&self) -> Result<()> {
         if self.owner_id.is_empty() {
-            return Err(Error::Crypto("owner_id cannot be empty".into()));
+            return Err(Error::Validation("owner_id cannot be empty"));
         }
         Ok(())
     }
