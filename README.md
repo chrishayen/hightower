@@ -113,11 +113,22 @@ storage with snapshot emission enabled:
 
 | Scenario | Payload | Throughput |
 |----------|---------|------------|
-| `engine_writes/put_1k/small` | 16 B keys / 64 B values | ~0.82 M ops/s |
-| `engine_writes/put_1k/large` | 32 B keys / 4 KB values | ~0.047 M ops/s |
-| `engine_reads/get_4k/hot` | 4 096 cached gets | ~6.3 M ops/s |
-| `engine_reads/get_4k/cold` | 4 096 gets after reopening | ~6.1 M ops/s |
-| `compaction/run_compaction_now` | 20 K writes + deletes | ~113 ms/run |
+| `engine_writes/put_1k/small` | 16 B keys / 64 B values | ~0.26 M ops/s |
+| `engine_writes/put_1k/medium` | 16 B keys / 512 B values | ~0.14 M ops/s |
+| `engine_writes/put_1k/large` | 32 B keys / 4 KB values | ~0.04 M ops/s |
+| `engine_reads/get_4k/hot` | 4 096 cached gets | ~2.9 M ops/s |
+| `engine_reads/get_4k/cold` | 4 096 gets after reopening | ~3.2 M ops/s |
+| `compaction/run_compaction_now` | 20 K writes + deletes | ~118 ms/run |
+
+Multi-threaded write scaling (4096 puts, 32 B keys / 256 B values):
+
+| Worker mode | Throughput |
+|-------------|------------|
+| Inline (`worker_threads = 0`) | ~0.40 M ops/s |
+| 1 worker | ~0.22 M ops/s |
+| 2 workers | ~0.33 M ops/s |
+| 4 workers | ~0.51 M ops/s |
+| 8 workers | ~0.47 M ops/s |
 
 Full reports (histograms, regression analysis) live under `target/criterion/`.
 
