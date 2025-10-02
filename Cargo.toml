@@ -9,6 +9,13 @@ readme = "README.md"
 repository = "https://github.com/chrishayen/hightower-kv"
 keywords = ["kv", "storage", "embedded", "log-structured"]
 categories = ["database", "data-structures"]
+exclude = [
+    "benches/*",
+    "examples/*",
+    "PLAN.md",
+    "DEVELOPERS.md",
+    "target",
+]
 
 [dependencies]
 hashbrown = "0.14"
