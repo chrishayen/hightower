@@ -68,6 +68,14 @@ impl KvState {
             }
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Vec<u8>, &(Vec<u8>, u64))> {
+        self.entries.iter()
+    }
+
+    pub fn insert_snapshot(&mut self, key: Vec<u8>, value: Vec<u8>, version: u64) {
+        self.entries.insert(key, (value, version));
+    }
 }
 
 #[cfg(test)]

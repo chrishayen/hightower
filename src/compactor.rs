@@ -87,6 +87,7 @@ mod tests {
     use super::*;
     use crate::command::Command;
     use crate::config::StoreConfig;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -261,20 +262,25 @@ mod tests {
         cfg.max_segment_size = 64;
         let storage = Arc::new(Storage::new(&cfg).unwrap());
 
-        storage
-            .apply(&Command::Set {
-                key: b"k".to_vec(),
-                value: b"v".to_vec(),
-                version: 1,
-                timestamp: 1,
-            })
-            .unwrap();
+        for i in 0..8 {
+            storage
+                .apply(&Command::Set {
+                    key: format!("snap{i}").into_bytes(),
+                    value: vec![b'x'; 32],
+                    version: i + 1,
+                    timestamp: i as i64,
+                })
+                .unwrap();
+        }
 
         let mut config = CompactionConfig::default();
         config.min_bytes = 0;
         config.emit_snapshot = true;
+        let snapshot_path = PathBuf::from(cfg.data_dir.clone()).join("snapshot.bin");
         let compactor = Compactor::new(storage, config);
         compactor.run_once().unwrap();
+
+        assert!(snapshot_path.exists());
     }
 
     #[test]

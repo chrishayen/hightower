@@ -32,6 +32,7 @@ pub struct Storage {
     segments: RwLock<Vec<Arc<LogSegment>>>,
     active_segment: RwLock<Arc<LogSegment>>,
     next_segment_id: Mutex<u64>,
+    snapshot_path: PathBuf,
 }
 
 impl Storage {
@@ -55,12 +56,15 @@ impl Storage {
             .ok_or_else(|| Error::Unimplemented("storage::active_segment_missing"))?;
         let index = rebuild_index(&segments)?;
 
+        let snapshot_path = data_dir.join("snapshot.bin");
+
         Ok(Self {
             config: config.clone(),
             index: RwLock::new(index),
             segments: RwLock::new(segments),
             active_segment: RwLock::new(active_segment),
             next_segment_id: Mutex::new(next_segment_id),
+            snapshot_path,
         })
     }
 
@@ -131,6 +135,20 @@ impl Storage {
             }
         }
         state
+    }
+
+    pub fn latest_version(&self) -> u64 {
+        self.index
+            .read()
+            .iter()
+            .map(|(_, entry)| entry.version)
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub fn load_snapshot(&self) -> Result<Option<(KvState, u64)>> {
+        let snapshot = Snapshot::new(&self.snapshot_path);
+        snapshot.load()
     }
 
     pub fn replay<F>(&self, mut visitor: F) -> Result<()>
@@ -439,7 +457,9 @@ impl<'a> SuspendedCompaction<'a> {
 
         if emit_snapshot {
             let state = storage.state_snapshot();
-            if let Err(err) = Snapshot::create(&state) {
+            let last_version = storage.latest_version();
+            let snapshot = Snapshot::new(&storage.snapshot_path);
+            if let Err(err) = snapshot.write(&state, last_version) {
                 if !matches!(err, Error::Unimplemented(_)) {
                     return Err(err);
                 }

@@ -28,11 +28,15 @@ impl SingleNodeEngine {
 
     pub fn with_config(config: StoreConfig) -> Result<Self> {
         let storage = Storage::new(&config)?;
-        let mut state = KvState::new();
-        let mut max_version = 0u64;
+        let (mut state, mut max_version) = match storage.load_snapshot()? {
+            Some((state, version)) => (state, version),
+            None => (KvState::new(), 0u64),
+        };
         storage.replay(|command| {
-            max_version = max_version.max(command.version());
-            state.apply(&command);
+            if command.version() > max_version {
+                max_version = max_version.max(command.version());
+                state.apply(&command);
+            }
             Ok(())
         })?;
         let start_version = max_version
