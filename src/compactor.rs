@@ -1,0 +1,186 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::error::Result;
+use crate::storage::Storage;
+
+/// Coordinates background segment merges to keep disk usage and read
+/// amplification under control.
+///
+/// The intended lifecycle for a single compaction run is:
+/// 1. Inspect storage metadata and pick cold segments whose combined size
+///    exceeds `min_bytes` or whose live-data ratio falls below a future
+///    heuristic. We cap the batch using `max_segments` to avoid long stalls.
+/// 2. Stream the chosen segments in log order, retaining the newest value per
+///    key while skipping tombstones older than `tombstone_grace`.
+/// 3. Write the surviving entries into a fresh segment, fsync it, rebuild its
+///    sparse index/Bloom filter, and atomically swap it into Storage while
+///    removing the old segment files.
+/// 4. Optionally trigger snapshotting so restart time stays stable even as log
+///    history churns.
+#[derive(Debug, Clone)]
+pub struct CompactionConfig {
+    pub min_bytes: u64,
+    pub max_segments: usize,
+    pub tombstone_grace: Duration,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            min_bytes: 32 * 1024 * 1024,
+            max_segments: 4,
+            tombstone_grace: Duration::from_secs(300),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Compactor {
+    storage: Arc<Storage>,
+    config: CompactionConfig,
+}
+
+impl Compactor {
+    pub fn new(storage: Arc<Storage>, config: CompactionConfig) -> Self {
+        Self { storage, config }
+    }
+
+    pub fn run_once(&self) -> Result<()> {
+        let sealed = self.storage.sealed_segments_snapshot();
+        if sealed.is_empty() {
+            return Ok(());
+        }
+
+        let total_bytes: u64 = sealed.iter().map(|segment| segment.bytes_written()).sum();
+        if total_bytes < self.config.min_bytes {
+            return Ok(());
+        }
+
+        if !self.storage.compact_all(self.config.tombstone_grace)? {
+            return Ok(());
+        }
+
+        self.storage.sync()?;
+        Ok(())
+    }
+
+    pub fn storage(&self) -> Arc<Storage> {
+        Arc::clone(&self.storage)
+    }
+
+    pub fn config(&self) -> &CompactionConfig {
+        &self.config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::Command;
+    use crate::config::StoreConfig;
+    use tempfile::tempdir;
+
+    #[test]
+    fn run_once_is_noop_when_under_threshold() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp.path().join("compactor").to_string_lossy().into_owned();
+        cfg.max_segment_size = 1_000_000;
+        let storage = Arc::new(Storage::new(&cfg).unwrap());
+        let compactor = Compactor::new(storage.clone(), CompactionConfig::default());
+        compactor.run_once().unwrap();
+        assert_eq!(storage.segment_snapshot().len(), 1);
+    }
+
+    #[test]
+    fn compacts_multiple_segments_into_one() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp.path().join("compactor").to_string_lossy().into_owned();
+        cfg.max_segment_size = 64;
+        let storage = Arc::new(Storage::new(&cfg).unwrap());
+        for i in 0..5 {
+            let command = Command::Set {
+                key: format!("key{i}").into_bytes(),
+                value: vec![b'x'; 32],
+                version: i + 1,
+                timestamp: i as i64,
+            };
+            storage.apply(&command).unwrap();
+        }
+        storage
+            .apply(&Command::Delete {
+                key: b"key1".to_vec(),
+                version: 99,
+                timestamp: 0,
+            })
+            .unwrap();
+        assert!(storage.segment_snapshot().len() > 1);
+
+        let mut config = CompactionConfig::default();
+        config.min_bytes = 0;
+        let compactor = Compactor::new(storage.clone(), config);
+        compactor.run_once().unwrap();
+
+        let segments = storage.segment_snapshot();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(storage.sealed_segments_snapshot().len(), 1);
+        let entry = storage.lookup(b"key1").unwrap();
+        assert!(entry.is_tombstone);
+        let command = storage.fetch_command(&entry).unwrap().unwrap();
+        assert!(matches!(command, Command::Delete { .. }));
+    }
+
+    #[test]
+    fn tombstone_grace_evicts_old_deletes() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp.path().join("compactor").to_string_lossy().into_owned();
+        cfg.max_segment_size = 64;
+        let storage = Arc::new(Storage::new(&cfg).unwrap());
+
+        storage
+            .apply(&Command::Set {
+                key: b"victim".to_vec(),
+                value: b"value".to_vec(),
+                version: 1,
+                timestamp: 1,
+            })
+            .unwrap();
+        storage
+            .apply(&Command::Delete {
+                key: b"victim".to_vec(),
+                version: 2,
+                timestamp: 0,
+            })
+            .unwrap();
+
+        for i in 0..5 {
+            storage
+                .apply(&Command::Set {
+                    key: format!("filler{i}").into_bytes(),
+                    value: vec![b'x'; 32],
+                    version: 10 + i,
+                    timestamp: 10 + i as i64,
+                })
+                .unwrap();
+        }
+
+        let mut config = CompactionConfig::default();
+        config.min_bytes = 0;
+        config.tombstone_grace = Duration::from_secs(1);
+        let compactor = Compactor::new(storage.clone(), config);
+        compactor.run_once().unwrap();
+
+        assert!(storage.lookup(b"victim").is_none());
+    }
+
+    #[test]
+    fn config_defaults_are_reasonable() {
+        let cfg = CompactionConfig::default();
+        assert!(cfg.min_bytes >= 4 * 1024 * 1024);
+        assert!(cfg.max_segments >= 1);
+        assert!(cfg.tombstone_grace >= Duration::from_secs(60));
+    }
+}
