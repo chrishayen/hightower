@@ -153,4 +153,5 @@ pub const NOUNS: &[&str] = &[
     "hammer",
     "fist",
     "strike",
+    "town",
 ];
