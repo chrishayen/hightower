@@ -48,7 +48,7 @@ async fn start_server() -> Result<(), BoxError> {
     let app = Router::new().route("/", get(root_health));
     let listener = TcpListener::bind(addr).await?;
 
-    info!(address = %addr, "Root API server listening");
+    info!(address = %addr, "Root API ready");
     axum::serve(listener, app).await?;
     Ok(())
 }
