@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.13", features = ["derive"] }
 hightower-wireguard = "0.1.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hex = "0.4"

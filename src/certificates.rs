@@ -1,4 +1,4 @@
-use hightower_wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
+use hightower_wireguard::crypto::{PrivateKey, PublicKey25519, dh_generate};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeCertificate {
@@ -20,6 +20,14 @@ impl NodeCertificate {
 
     pub fn public_key(&self) -> &PublicKey25519 {
         &self.public_key
+    }
+
+    pub fn private_key_hex(&self) -> String {
+        hex::encode(self.private_key)
+    }
+
+    pub fn public_key_hex(&self) -> String {
+        hex::encode(self.public_key)
     }
 }
 
@@ -44,12 +52,36 @@ mod tests {
     }
 
     #[test]
+    fn private_key_hex_encodes_key() {
+        let private_key = [0xAAu8; 32];
+        let public_key = [0u8; 32];
+        let cert = NodeCertificate::from_keys(private_key, public_key);
+
+        assert_eq!(
+            cert.private_key_hex(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn public_key_hex_encodes_key() {
+        let private_key = [0u8; 32];
+        let public_key = [0xBBu8; 32];
+        let cert = NodeCertificate::from_keys(private_key, public_key);
+
+        assert_eq!(
+            cert.public_key_hex(),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+    }
+
+    #[test]
     fn generate_returns_random_keys() {
         let cert = generate();
 
         assert_eq!(cert.private_key().len(), 32);
         assert_eq!(cert.public_key().len(), 32);
-        assert!(cert.private_key().iter().any(|byte| *byte != 0));
-        assert!(cert.public_key().iter().any(|byte| *byte != 0));
+        assert_eq!(cert.private_key_hex().len(), 64);
+        assert_eq!(cert.public_key_hex().len(), 64);
     }
 }
