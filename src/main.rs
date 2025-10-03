@@ -18,22 +18,13 @@ fn main() {
     let cli = Cli::parse();
     let mode = mode::resolve(&cli);
 
-    let token = token::fetch(|key| std::env::var(key)).unwrap_or_else(|err| {
+    token::fetch(|key| std::env::var(key)).unwrap_or_else(|err| {
         error!("{}", err);
         std::process::exit(1);
     });
 
-    info!("HT token available");
-
-    match mode {
-        Mode::Root => info!("Running in root mode"),
-        Mode::Node => {
-            let certificate = node::startup();
-            info!(
-                public_key_length = certificate.public_key().len(),
-                "Running in node mode"
-            );
-        }
+    if let Mode::Node = mode {
+        node::startup();
     }
 
     info!("Waiting for Ctrl-C to exit");
@@ -41,6 +32,4 @@ fn main() {
         Ok(()) => info!("Shutdown signal received"),
         Err(err) => error!(?err, "Failed while waiting for shutdown signal"),
     }
-
-    drop(token);
 }
