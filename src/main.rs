@@ -16,7 +16,7 @@ use std::process;
 use tracing::{error, info};
 
 use crate::cli::Cli;
-use crate::common::{CommonContext, HT_TOKEN_KEY};
+use crate::common::{CommonContext, HT_AUTH_KEY};
 use crate::mode::Mode;
 
 fn main() {
@@ -59,10 +59,10 @@ fn run_dev_mode(base_context: &CommonContext) {
 }
 
 fn replicate_token(source: &CommonContext, target: &CommonContext) {
-    match source.kv.get_bytes(HT_TOKEN_KEY) {
-        Ok(Some(token)) => target.kv.put_secret(HT_TOKEN_KEY, &token),
-        Ok(None) => tracing::warn!("HT token missing; skipping namespace propagation"),
-        Err(err) => tracing::error!(?err, "Failed to read HT token for namespace propagation"),
+    match source.kv.get_bytes(HT_AUTH_KEY) {
+        Ok(Some(token)) => target.kv.put_secret(HT_AUTH_KEY, &token),
+        Ok(None) => tracing::warn!("HT auth key missing; skipping namespace propagation"),
+        Err(err) => tracing::error!(?err, "Failed to read HT auth key for namespace propagation"),
     }
 }
 
@@ -103,7 +103,7 @@ mod tests {
         let kv = kv::initialize(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
 
-        context.kv.put_secret(HT_TOKEN_KEY, b"test-token");
+        context.kv.put_secret(HT_AUTH_KEY, b"test-auth-key");
 
         route(Mode::Dev, &context);
 
@@ -135,16 +135,16 @@ mod tests {
 
         let node_token = context
             .kv
-            .get_bytes(b"node/secrets/ht_token")
+            .get_bytes(b"node/secrets/ht_auth_key")
             .expect("kv read")
             .expect("node token present");
-        assert_eq!(node_token, b"test-token");
+        assert_eq!(node_token, b"test-auth-key");
 
         let root_token = context
             .kv
-            .get_bytes(b"root/secrets/ht_token")
+            .get_bytes(b"root/secrets/ht_auth_key")
             .expect("kv read")
             .expect("root token present");
-        assert_eq!(root_token, b"test-token");
+        assert_eq!(root_token, b"test-auth-key");
     }
 }

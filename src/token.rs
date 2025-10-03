@@ -9,7 +9,7 @@ pub enum TokenError {
 impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TokenError::Missing => write!(f, "HT_TOKEN environment variable must be set."),
+            TokenError::Missing => write!(f, "HT_AUTH_KEY environment variable must be set."),
         }
     }
 }
@@ -20,7 +20,7 @@ pub fn fetch<F>(mut lookup: F) -> Result<String, TokenError>
 where
     F: FnMut(&str) -> Result<String, VarError>,
 {
-    lookup("HT_TOKEN").map_err(|_| TokenError::Missing)
+    lookup("HT_AUTH_KEY").map_err(|_| TokenError::Missing)
 }
 
 #[cfg(test)]

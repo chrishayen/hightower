@@ -3,20 +3,19 @@ $(error Please run this file with GNU Make (gmake))
 endif
 
 CARGO_BIN ?= cargo
-HT_TOKEN ?= test-token
+HT_AUTH_KEY ?= test-auth-key
 RUST_LOG ?= debug
 
 .PHONY: dev
-## Run the application in dev mode with debug logging and a test token
+## Run the application in dev mode with debug logging and a test auth key
 dev:
-	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- dev
+	HT_AUTH_KEY=$(HT_AUTH_KEY) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- dev
 
 devroot:
-	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- root
+	HT_AUTH_KEY=$(HT_AUTH_KEY) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- root
 
 devnode:
-	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- node
+	HT_AUTH_KEY=$(HT_AUTH_KEY) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- node
 
 test:
 	cargo test
-

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
 pub const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
-pub const HT_TOKEN_KEY: &[u8] = b"secrets/ht_token";
+pub const HT_AUTH_KEY: &[u8] = b"secrets/ht_auth_key";
 
 #[derive(Clone, Debug)]
 pub struct CommonContext {
@@ -103,7 +103,7 @@ pub enum CommonError {
 impl fmt::Display for CommonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CommonError::Token(err) => write!(f, "failed to read HT_TOKEN: {}", err),
+            CommonError::Token(err) => write!(f, "failed to read HT_AUTH_KEY: {}", err),
             CommonError::Kv(err) => write!(f, "failed to initialize key-value store: {}", err),
         }
     }
@@ -129,7 +129,7 @@ where
     let token = token::fetch(|key| lookup(key)).map_err(CommonError::Token)?;
     let kv = kv::initialize(cli.kv.as_deref()).map_err(CommonError::Kv)?;
     let context = CommonContext::new(kv);
-    context.kv.put_secret(HT_TOKEN_KEY, token.as_bytes());
+    context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
     Ok(context)
 }
 
@@ -146,13 +146,13 @@ mod tests {
             kv: Some(temp.path().to_path_buf()),
         };
 
-        let context =
-            prepare_with_token_source(&cli, |_| Ok("test-token".into())).expect("prepare succeeds");
+        let context = prepare_with_token_source(&cli, |_| Ok("test-auth-key".into()))
+            .expect("prepare succeeds");
         let stored = context
             .kv
-            .get_bytes(HT_TOKEN_KEY)
+            .get_bytes(HT_AUTH_KEY)
             .expect("kv read")
             .expect("value present");
-        assert_eq!(stored, b"test-token");
+        assert_eq!(stored, b"test-auth-key");
     }
 }
