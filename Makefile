@@ -17,3 +17,6 @@ devroot:
 devnode:
 	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- node
 
+test:
+	cargo test
+

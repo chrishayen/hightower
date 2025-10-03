@@ -16,7 +16,7 @@ use std::process;
 use tracing::{error, info};
 
 use crate::cli::Cli;
-use crate::common::CommonContext;
+use crate::common::{CommonContext, HT_TOKEN_KEY};
 use crate::mode::Mode;
 
 fn main() {
@@ -43,13 +43,26 @@ fn route(mode: Mode, context: &CommonContext) {
     match mode {
         Mode::Node => node_startup::run(context),
         Mode::Root => root_startup::run(context),
-        Mode::Dev => {
-            let node_context = context.namespaced(b"node");
-            let root_context = context.namespaced(b"root");
+        Mode::Dev => run_dev_mode(context),
+    }
+}
 
-            node_startup::run(&node_context);
-            root_startup::run(&root_context);
-        }
+fn run_dev_mode(base_context: &CommonContext) {
+    let node_context = base_context.namespaced(b"node");
+    let root_context = base_context.namespaced(b"root");
+
+    replicate_token(base_context, &node_context);
+    replicate_token(base_context, &root_context);
+
+    node_startup::run(&node_context);
+    root_startup::run(&root_context);
+}
+
+fn replicate_token(source: &CommonContext, target: &CommonContext) {
+    match source.kv.get_bytes(HT_TOKEN_KEY) {
+        Ok(Some(token)) => target.kv.put_secret(HT_TOKEN_KEY, &token),
+        Ok(None) => tracing::warn!("HT token missing; skipping namespace propagation"),
+        Err(err) => tracing::error!(?err, "Failed to read HT token for namespace propagation"),
     }
 }
 
@@ -90,6 +103,8 @@ mod tests {
         let kv = kv::initialize(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
 
+        context.kv.put_secret(HT_TOKEN_KEY, b"test-token");
+
         route(Mode::Dev, &context);
 
         let name_bytes = context
@@ -117,5 +132,19 @@ mod tests {
 
         let unprefixed_certificate = context.kv.get_bytes(NODE_CERTIFICATE_KEY).expect("kv read");
         assert!(unprefixed_certificate.is_none());
+
+        let node_token = context
+            .kv
+            .get_bytes(b"node/secrets/ht_token")
+            .expect("kv read")
+            .expect("node token present");
+        assert_eq!(node_token, b"test-token");
+
+        let root_token = context
+            .kv
+            .get_bytes(b"root/secrets/ht_token")
+            .expect("kv read")
+            .expect("root token present");
+        assert_eq!(root_token, b"test-token");
     }
 }
