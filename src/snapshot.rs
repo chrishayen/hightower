@@ -9,16 +9,19 @@ use crate::state::KvState;
 
 const SNAPSHOT_TMP_SUFFIX: &str = "tmp";
 
+/// Handles reading and writing state snapshots to disk
 #[derive(Debug)]
 pub struct Snapshot {
     path: PathBuf,
 }
 
 impl Snapshot {
+    /// Creates a new snapshot handler for the given file path
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 
+    /// Writes a state snapshot to disk atomically using a temporary file
     pub fn write(&self, state: &KvState, last_version: u64) -> Result<()> {
         let parent = self
             .path
@@ -43,6 +46,7 @@ impl Snapshot {
         Ok(())
     }
 
+    /// Loads a snapshot from disk, returning None if the file doesn't exist
     pub fn load(&self) -> Result<Option<(KvState, u64)>> {
         let mut file = match File::open(&self.path) {
             Ok(file) => file,

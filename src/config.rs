@@ -1,13 +1,20 @@
 use std::thread;
 use std::time::Duration;
 
+/// Configuration for the key-value store
 #[derive(Clone, Debug)]
 pub struct StoreConfig {
+    /// Directory where data files are stored
     pub data_dir: String,
+    /// Maximum size of a log segment in bytes before rotation
     pub max_segment_size: u64,
+    /// Interval between compaction runs
     pub compaction_interval: Duration,
+    /// Interval between fsync operations
     pub fsync_interval: Duration,
+    /// Whether to emit a snapshot after compaction
     pub emit_snapshot_after_compaction: bool,
+    /// Number of worker threads for background tasks
     pub worker_threads: usize,
 }
 

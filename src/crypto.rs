@@ -8,15 +8,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
+/// Trait for hashing and verifying secrets like passwords and API keys
 pub trait SecretHasher: Send + Sync {
+    /// Hashes a secret using a cryptographically secure algorithm
     fn hash_secret(&self, secret: &[u8]) -> Result<SecretHash>;
+    /// Verifies a secret against a previously computed hash
     fn verify_secret(&self, secret: &[u8], hash: &SecretHash) -> Result<bool>;
 }
 
+/// A cryptographically secure hash of a secret
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretHash(String);
 
 impl SecretHash {
+    /// Returns the hash as a string slice
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -34,11 +39,13 @@ impl AsRef<str> for SecretHash {
     }
 }
 
+/// Secret hasher using the Argon2 algorithm
 pub struct Argon2SecretHasher {
     argon2: Argon2<'static>,
 }
 
 impl Argon2SecretHasher {
+    /// Creates a new Argon2 secret hasher with default settings
     pub fn new() -> Self {
         Self {
             argon2: Argon2::default(),
@@ -69,28 +76,37 @@ impl SecretHasher for Argon2SecretHasher {
     }
 }
 
+/// Trait for encrypting and decrypting data using envelope encryption
 pub trait EnvelopeEncryptor: Send + Sync {
+    /// Encrypts plaintext and returns an encrypted blob with nonce
     fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedBlob>;
+    /// Decrypts an encrypted blob and returns the plaintext
     fn decrypt(&self, blob: &EncryptedBlob) -> Result<Vec<u8>>;
 }
 
+/// An encrypted blob containing a nonce and ciphertext
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncryptedBlob {
+    /// Random nonce used for encryption
     pub nonce: [u8; 12],
+    /// Encrypted ciphertext
     pub ciphertext: Vec<u8>,
 }
 
+/// Encryptor using AES-256-GCM authenticated encryption
 pub struct AesGcmEncryptor {
     cipher: Aes256Gcm,
 }
 
 impl AesGcmEncryptor {
+    /// Creates a new AES-GCM encryptor with the provided 32-byte key
     pub fn new(key_bytes: [u8; 32]) -> Self {
         Self {
             cipher: Aes256Gcm::new(&Key::<Aes256Gcm>::from_slice(&key_bytes)),
         }
     }
 
+    /// Creates a new AES-GCM encryptor from a byte slice, returning an error if not exactly 32 bytes
     pub fn from_slice(slice: &[u8]) -> Result<Self> {
         let key: [u8; 32] = slice
             .try_into()

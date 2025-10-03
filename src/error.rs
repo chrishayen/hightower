@@ -2,24 +2,34 @@ use std::io;
 
 use thiserror::Error;
 
+/// Result type alias using the crate's Error type
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Error types for the key-value store
 #[derive(Debug, Error)]
 pub enum Error {
+    /// Feature not yet implemented
     #[error("feature unimplemented: {0}")]
     Unimplemented(&'static str),
+    /// Validation failed for input data
     #[error("validation failed: {0}")]
     Validation(&'static str),
+    /// Conflict occurred (e.g., duplicate key)
     #[error("conflict: {0}")]
     Conflict(&'static str),
+    /// Requested item was not found
     #[error("not found: {0}")]
     NotFound(&'static str),
+    /// Internal invariant was violated
     #[error("invariant violated: {0}")]
     Invariant(&'static str),
+    /// Cryptographic operation failed
     #[error("crypto error: {0}")]
     Crypto(String),
+    /// I/O operation failed
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    /// Serialization or deserialization failed
     #[error("serialization error: {0}")]
     Serialization(String),
 }

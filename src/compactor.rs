@@ -18,11 +18,16 @@ use crate::storage::{CompactionOptions, Storage};
 ///    removing the old segment files.
 /// 4. Optionally trigger snapshotting so restart time stays stable even as log
 ///    history churns.
+/// Configuration for compaction behavior
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
+    /// Minimum bytes needed before compaction runs
     pub min_bytes: u64,
+    /// Maximum number of segments to compact at once
     pub max_segments: usize,
+    /// How long to keep tombstones before eviction
     pub tombstone_grace: Duration,
+    /// Whether to emit a snapshot after compaction
     pub emit_snapshot: bool,
 }
 
@@ -37,6 +42,7 @@ impl Default for CompactionConfig {
     }
 }
 
+/// Compactor that merges log segments to reduce disk usage and read amplification
 #[derive(Debug, Clone)]
 pub struct Compactor {
     storage: Arc<Storage>,
@@ -44,10 +50,12 @@ pub struct Compactor {
 }
 
 impl Compactor {
+    /// Creates a new compactor with the given storage and configuration
     pub fn new(storage: Arc<Storage>, config: CompactionConfig) -> Self {
         Self { storage, config }
     }
 
+    /// Runs a single compaction cycle if conditions are met
     pub fn run_once(&self) -> Result<()> {
         let sealed = self.storage.sealed_segments_snapshot();
         if sealed.is_empty() {
@@ -73,10 +81,12 @@ impl Compactor {
         Ok(())
     }
 
+    /// Returns a clone of the storage Arc
     pub fn storage(&self) -> Arc<Storage> {
         Arc::clone(&self.storage)
     }
 
+    /// Returns a reference to the compaction configuration
     pub fn config(&self) -> &CompactionConfig {
         &self.config
     }

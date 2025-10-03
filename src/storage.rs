@@ -17,14 +17,20 @@ use crate::state::KvState;
 const SEGMENT_PREFIX: &str = "segment-";
 const SEGMENT_SUFFIX: &str = ".log";
 
+/// Options for controlling log compaction behavior.
 #[derive(Clone, Debug)]
 pub struct CompactionOptions {
+    /// Minimum age before tombstones are permanently removed
     pub tombstone_grace: Duration,
+    /// Minimum bytes to accumulate before compaction runs
     pub min_bytes: u64,
+    /// Maximum number of segments to compact in one pass
     pub max_segments: usize,
+    /// Whether to emit a snapshot after compaction
     pub emit_snapshot: bool,
 }
 
+/// Log-structured storage engine with indexing and compaction.
 #[derive(Debug)]
 pub struct Storage {
     config: StoreConfig,
@@ -36,6 +42,7 @@ pub struct Storage {
 }
 
 impl Storage {
+    /// Creates a new storage instance, loading existing segments from disk.
     pub fn new(config: &StoreConfig) -> Result<Self> {
         let data_dir = PathBuf::from(&config.data_dir);
         create_dir_all(&data_dir)?;
@@ -68,6 +75,7 @@ impl Storage {
         })
     }
 
+    /// Appends a command to the active segment and updates the index.
     pub fn apply(&self, command: &Command) -> Result<()> {
         let active = { self.active_segment.read().clone() };
         let position = active.append(command)?;
@@ -85,6 +93,7 @@ impl Storage {
         Ok(())
     }
 
+    /// Looks up the index entry for a key, recovering from disk if needed.
     pub fn lookup(&self, key: &[u8]) -> Option<IndexEntry> {
         if let Some(entry) = self.index.read().get(key).cloned() {
             return Some(entry);
@@ -95,15 +104,18 @@ impl Storage {
         }
     }
 
+    /// Reads the command corresponding to an index entry from its segment.
     pub fn fetch_command(&self, entry: &IndexEntry) -> Result<Option<Command>> {
         let segment = self.segment_for(entry.segment_id)?;
         segment.read(entry.offset)
     }
 
+    /// Returns a snapshot of all segments.
     pub fn segment_snapshot(&self) -> Vec<Arc<LogSegment>> {
         self.segments.read().iter().cloned().collect()
     }
 
+    /// Returns a snapshot of sealed (non-active) segments.
     pub(crate) fn sealed_segments_snapshot(&self) -> Vec<Arc<LogSegment>> {
         let guard = self.segments.read();
         if guard.len() <= 1 {
@@ -112,6 +124,7 @@ impl Storage {
         guard[..guard.len() - 1].to_vec()
     }
 
+    /// Compacts sealed segments according to the provided options.
     pub fn compact_all(&self, options: CompactionOptions) -> Result<bool> {
         match SuspendedCompaction::prepare(self, options.clone())? {
             Some(compaction) => compaction.execute(options.emit_snapshot),
@@ -119,11 +132,13 @@ impl Storage {
         }
     }
 
+    /// Syncs the active segment to disk.
     pub fn sync(&self) -> Result<()> {
         let active = { self.active_segment.read().clone() };
         active.sync()
     }
 
+    /// Rebuilds the current key-value state from the index.
     pub fn state_snapshot(&self) -> KvState {
         let index = self.index.read();
         let mut state = KvState::new();
@@ -143,6 +158,7 @@ impl Storage {
         state
     }
 
+    /// Returns the highest version number in the index.
     pub fn latest_version(&self) -> u64 {
         self.index
             .read()
@@ -152,11 +168,13 @@ impl Storage {
             .unwrap_or(0)
     }
 
+    /// Loads a snapshot from disk if one exists.
     pub fn load_snapshot(&self) -> Result<Option<(KvState, u64)>> {
         let snapshot = Snapshot::new(&self.snapshot_path);
         snapshot.load()
     }
 
+    /// Replays all commands from all segments in order.
     pub fn replay<F>(&self, mut visitor: F) -> Result<()>
     where
         F: FnMut(Command) -> Result<()>,
@@ -220,6 +238,7 @@ impl Storage {
     }
 }
 
+/// Loads all log segments from the data directory.
 fn load_segments(dir: &Path, config: &StoreConfig) -> Result<Vec<Arc<LogSegment>>> {
     if !dir.exists() {
         return Ok(Vec::new());
@@ -250,11 +269,13 @@ fn load_segments(dir: &Path, config: &StoreConfig) -> Result<Vec<Arc<LogSegment>
     Ok(segments)
 }
 
+/// Opens a segment with the given ID in the specified directory.
 fn open_segment(dir: &Path, id: u64, config: &StoreConfig) -> Result<LogSegment> {
     let path = segment_path(dir, id);
     open_segment_at_path(id, path, config)
 }
 
+/// Opens a segment at the specified path with the given ID.
 fn open_segment_at_path(id: u64, path: PathBuf, config: &StoreConfig) -> Result<LogSegment> {
     let mut segment_config = SegmentConfig::new(id, path);
     segment_config.sparse_every = 32;
@@ -263,10 +284,12 @@ fn open_segment_at_path(id: u64, path: PathBuf, config: &StoreConfig) -> Result<
     LogSegment::open(segment_config)
 }
 
+/// Constructs the file path for a segment with the given ID.
 fn segment_path(dir: &Path, id: u64) -> PathBuf {
     dir.join(format!("{SEGMENT_PREFIX}{id:020}{SEGMENT_SUFFIX}"))
 }
 
+/// Extracts the segment ID from a filename if it matches the expected pattern.
 fn parse_segment_id(name: &str) -> Option<u64> {
     if !name.starts_with(SEGMENT_PREFIX) || !name.ends_with(SEGMENT_SUFFIX) {
         return None;
@@ -276,6 +299,7 @@ fn parse_segment_id(name: &str) -> Option<u64> {
     name[start..end].parse::<u64>().ok()
 }
 
+/// Rebuilds the index by scanning all segments.
 fn rebuild_index(segments: &[Arc<LogSegment>]) -> Result<Index> {
     let mut builder = crate::index::IndexBuilder::new();
     let mut ordered_segments = segments.to_vec();
@@ -300,12 +324,14 @@ fn rebuild_index(segments: &[Arc<LogSegment>]) -> Result<Index> {
     Ok(Index::rebuild(builder))
 }
 
+/// Estimates the number of items in a segment based on its max size.
 fn normalized_item_estimate(max_segment_size: u64) -> usize {
     let bytes_per_entry = 256u64;
     let estimate = (max_segment_size / bytes_per_entry).max(1);
     estimate.min(usize::MAX as u64) as usize
 }
 
+/// A prepared compaction operation ready to execute.
 struct SuspendedCompaction<'a> {
     storage: &'a Storage,
     options: CompactionOptions,

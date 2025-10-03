@@ -5,23 +5,31 @@ use crate::engine::{KvEngine, SnapshotEngine};
 use crate::error::{Error, Result};
 use crate::state::{ApplyOutcome, KvState};
 
+/// Trait for submitting commands to a replication system
 pub trait CommandSubmitter: Send + Sync {
+    /// Submits a single command and returns the outcome
     fn submit(&self, command: Command) -> Result<ApplyOutcome>;
 
+    /// Submits a batch of commands and returns the outcomes
     fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: IntoIterator<Item = Command>;
 }
 
+/// Trait for providing snapshots of the replicated state
 pub trait SnapshotProvider: Send + Sync {
+    /// Returns a snapshot of the current state
     fn snapshot_state(&self) -> Result<KvState>;
+    /// Returns the latest version number
     fn latest_version(&self) -> Result<u64>;
 }
 
+/// Combined trait for replication handles that can submit commands and provide snapshots
 pub trait ReplicationHandle: CommandSubmitter + SnapshotProvider {}
 
 impl<T> ReplicationHandle for T where T: CommandSubmitter + SnapshotProvider {}
 
+/// Null implementation of replication that returns unimplemented errors
 #[derive(Debug)]
 pub struct NullReplication;
 
@@ -48,6 +56,7 @@ impl SnapshotProvider for NullReplication {
     }
 }
 
+/// Local replication implementation that forwards to a single engine
 #[derive(Debug, Clone)]
 pub struct LocalReplication<E>
 where
@@ -60,6 +69,7 @@ impl<E> LocalReplication<E>
 where
     E: KvEngine + SnapshotEngine,
 {
+    /// Creates a new local replication handle for the given engine
     pub fn new(engine: Arc<E>) -> Self {
         Self { engine }
     }

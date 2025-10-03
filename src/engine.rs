@@ -13,8 +13,11 @@ use crate::id_generator::IdGenerator;
 use crate::state::{ApplyOutcome, ConcurrentKvState, KvState};
 use crate::storage::Storage;
 
+/// Core key-value engine trait for command submission and retrieval.
 pub trait KvEngine: Send + Sync {
+    /// Submits a single command for execution.
     fn submit(&self, command: Command) -> Result<ApplyOutcome>;
+    /// Submits a batch of commands for execution.
     fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: IntoIterator<Item = Command>,
@@ -25,11 +28,15 @@ pub trait KvEngine: Send + Sync {
         }
         Ok(outcomes)
     }
+    /// Retrieves the value for a key if it exists.
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 }
 
+/// Trait for engines that can produce state snapshots.
 pub trait SnapshotEngine {
+    /// Returns a snapshot of the current key-value state.
     fn snapshot_state(&self) -> KvState;
+    /// Returns the latest version number in the store.
     fn latest_version(&self) -> u64;
 }
 
@@ -167,6 +174,7 @@ enum WorkItem {
     },
 }
 
+/// Single-node key-value engine with worker threads and automatic compaction.
 #[derive(Debug)]
 pub struct SingleNodeEngine {
     shared: Arc<EngineShared>,
@@ -177,10 +185,12 @@ pub struct SingleNodeEngine {
 }
 
 impl SingleNodeEngine {
+    /// Creates a new engine with default configuration.
     pub fn new() -> Result<Self> {
         Self::with_config(StoreConfig::default())
     }
 
+    /// Creates a new engine with the specified configuration.
     pub fn with_config(config: StoreConfig) -> Result<Self> {
         let worker_threads = config.worker_threads;
         let storage = Arc::new(Storage::new(&config)?);
@@ -240,6 +250,7 @@ impl SingleNodeEngine {
         self.shared.next_version()
     }
 
+    /// Inserts or updates a key-value pair.
     pub fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<ApplyOutcome> {
         let version = self.next_version();
         let command = Command::Set {
@@ -251,6 +262,7 @@ impl SingleNodeEngine {
         self.dispatch_command(command)
     }
 
+    /// Deletes a key from the store.
     pub fn delete(&self, key: Vec<u8>) -> Result<ApplyOutcome> {
         let version = self.next_version();
         let command = Command::Delete {
@@ -261,14 +273,17 @@ impl SingleNodeEngine {
         self.dispatch_command(command)
     }
 
+    /// Returns the number of keys in the store.
     pub fn len(&self) -> usize {
         self.shared.len()
     }
 
+    /// Flushes pending writes to disk.
     pub fn flush(&self) -> Result<()> {
         self.shared.storage.sync()
     }
 
+    /// Submits a batch of commands for execution.
     pub fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
     where
         I: IntoIterator<Item = Command>,
@@ -277,6 +292,7 @@ impl SingleNodeEngine {
         self.dispatch_batch(collected)
     }
 
+    /// Executes a read operation with a consistent snapshot of the state.
     pub fn read_with<F, R>(&self, reader: F) -> R
     where
         F: FnOnce(&KvState) -> R,
@@ -284,6 +300,7 @@ impl SingleNodeEngine {
         self.shared.read_with(reader)
     }
 
+    /// Triggers an immediate compaction run.
     pub fn run_compaction_now(&self) -> Result<()> {
         self.shared.run_compaction_now()
     }
@@ -434,6 +451,7 @@ impl SnapshotEngine for SingleNodeEngine {
     }
 }
 
+/// Spawns worker threads to process commands concurrently.
 fn spawn_workers(
     count: usize,
     shared: Arc<EngineShared>,
@@ -472,6 +490,7 @@ fn worker_loop(shared: Arc<EngineShared>, task_rx: Receiver<WorkItem>) {
     }
 }
 
+/// Spawns a background worker to run periodic compaction.
 fn spawn_compaction_worker(
     shared: Arc<EngineShared>,
     shutdown: Receiver<()>,
@@ -498,6 +517,7 @@ fn spawn_compaction_worker(
     )
 }
 
+/// Returns the current Unix timestamp in seconds.
 fn current_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

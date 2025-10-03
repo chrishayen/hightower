@@ -1,33 +1,46 @@
 use serde::{Deserialize, Serialize};
 
+/// Commands that can be applied to the key-value store
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Command {
+    /// Sets a key to a value with version and timestamp
     Set {
+        /// The key to set
         key: Vec<u8>,
+        /// The value to store
         value: Vec<u8>,
+        /// Version number for conflict resolution
         version: u64,
+        /// Timestamp when the command was created
         timestamp: i64,
     },
+    /// Deletes a key with version and timestamp
     Delete {
+        /// The key to delete
         key: Vec<u8>,
+        /// Version number for conflict resolution
         version: u64,
+        /// Timestamp when the command was created
         timestamp: i64,
     },
 }
 
 impl Command {
+    /// Returns the key referenced by this command
     pub fn key(&self) -> &[u8] {
         match self {
             Command::Set { key, .. } | Command::Delete { key, .. } => key,
         }
     }
 
+    /// Returns the version number of this command
     pub fn version(&self) -> u64 {
         match self {
             Command::Set { version, .. } | Command::Delete { version, .. } => *version,
         }
     }
 
+    /// Returns the timestamp of this command
     pub fn timestamp(&self) -> i64 {
         match self {
             Command::Set { timestamp, .. } | Command::Delete { timestamp, .. } => *timestamp,

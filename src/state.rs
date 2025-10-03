@@ -9,33 +9,42 @@ use crate::command::Command;
 
 const DEFAULT_SHARDS: usize = 64;
 
+/// Single-threaded key-value state with versioned entries
 #[derive(Debug, Default)]
 pub struct KvState {
     entries: HashMap<Vec<u8>, (Vec<u8>, u64)>,
 }
 
+/// Outcome of applying a command to the state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplyOutcome {
+    /// Command was successfully applied
     Applied,
+    /// Command was ignored because it was stale
     IgnoredStale,
+    /// Key was removed from the state
     Removed,
 }
 
 impl KvState {
+    /// Creates a new empty key-value state
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the number of entries in the state
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Gets the value for the given key
     pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
         self.entries
             .get(key)
             .map(|(value, _version)| value.as_slice())
     }
 
+    /// Evaluates what would happen if the command were applied without mutating state
     pub fn evaluate(&self, command: &Command) -> ApplyOutcome {
         match command {
             Command::Set { key, version, .. } => match self.entries.get(key) {
@@ -52,6 +61,7 @@ impl KvState {
         }
     }
 
+    /// Applies a command to the state and returns the outcome
     pub fn apply(&mut self, command: &Command) -> ApplyOutcome {
         match command {
             Command::Set {
@@ -76,19 +86,23 @@ impl KvState {
         }
     }
 
+    /// Inserts a snapshot entry directly into the state without version checking
     pub fn insert_snapshot(&mut self, key: Vec<u8>, value: Vec<u8>, version: u64) {
         self.entries.insert(key, (value, version));
     }
 
+    /// Returns an iterator over all entries in the state
     pub fn iter(&self) -> impl Iterator<Item = (&Vec<u8>, &(Vec<u8>, u64))> {
         self.entries.iter()
     }
 
+    /// Consumes the state and returns the underlying entries map
     pub fn into_entries(self) -> HashMap<Vec<u8>, (Vec<u8>, u64)> {
         self.entries
     }
 }
 
+/// Thread-safe sharded key-value state for concurrent access
 #[derive(Debug)]
 pub struct ConcurrentKvState {
     shards: Vec<Shard>,
@@ -101,6 +115,7 @@ impl Default for ConcurrentKvState {
 }
 
 impl ConcurrentKvState {
+    /// Creates a new concurrent key-value state with default shard count
     pub fn new() -> Self {
         Self::with_shard_count(DEFAULT_SHARDS)
     }
@@ -114,6 +129,7 @@ impl ConcurrentKvState {
         Self { shards }
     }
 
+    /// Returns the total number of entries across all shards
     pub fn len(&self) -> usize {
         self.shards
             .iter()
@@ -121,18 +137,21 @@ impl ConcurrentKvState {
             .sum()
     }
 
+    /// Gets a cloned value for the given key
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         let shard = self.shard_for(key);
         let guard = shard.entries.lock();
         guard.get(key).map(|(value, _)| value.clone())
     }
 
+    /// Locks the shard containing the given key and returns an entry guard
     pub fn lock_entry<'a>(&'a self, key: &[u8]) -> EntryGuard<'a> {
         let shard = self.shard_for(key);
         let guard = shard.entries.lock();
         EntryGuard { shard, guard }
     }
 
+    /// Executes a read operation on a snapshot of the entire state
     pub fn read_with<F, R>(&self, reader: F) -> R
     where
         F: FnOnce(&KvState) -> R,
@@ -141,6 +160,7 @@ impl ConcurrentKvState {
         reader(&snapshot)
     }
 
+    /// Creates a consistent snapshot of the entire state
     pub fn to_snapshot(&self) -> KvState {
         let mut snapshot = KvState::new();
         for shard in &self.shards {
@@ -152,6 +172,7 @@ impl ConcurrentKvState {
         snapshot
     }
 
+    /// Inserts a snapshot entry directly into the state
     pub fn insert_snapshot(&self, key: Vec<u8>, value: Vec<u8>, version: u64) {
         let shard = self.shard_for(&key);
         let mut guard = shard.entries.lock();
@@ -187,12 +208,14 @@ impl From<KvState> for ConcurrentKvState {
     }
 }
 
+/// Guard for a locked shard entry that allows atomic operations
 pub struct EntryGuard<'a> {
     shard: &'a Shard,
     guard: parking_lot::MutexGuard<'a, HashMap<Vec<u8>, (Vec<u8>, u64)>>,
 }
 
 impl<'a> EntryGuard<'a> {
+    /// Evaluates what would happen if the command were applied without mutating state
     pub fn evaluate(&self, command: &Command) -> ApplyOutcome {
         match command {
             Command::Set { key, version, .. } => match self.guard.get(key) {
@@ -209,6 +232,7 @@ impl<'a> EntryGuard<'a> {
         }
     }
 
+    /// Applies a command to the locked entry and returns the outcome
     pub fn apply(&mut self, command: &Command) -> ApplyOutcome {
         match command {
             Command::Set {

@@ -1,57 +1,73 @@
 use hashbrown::HashMap;
 use std::sync::Arc;
 
+/// Entry in the index pointing to a command in a log segment
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexEntry {
+    /// ID of the segment containing this entry
     pub segment_id: u64,
+    /// Byte offset within the segment
     pub offset: u64,
+    /// Length of the serialized command
     pub length: u32,
+    /// Version number of the command
     pub version: u64,
+    /// Whether this entry represents a tombstone (delete)
     pub is_tombstone: bool,
 }
 
+/// Copy-on-write index mapping keys to their latest log positions
 #[derive(Clone, Default, Debug)]
 pub struct Index {
     inner: Arc<HashMap<Vec<u8>, IndexEntry>>,
 }
 
 impl Index {
+    /// Creates a new empty index
     pub fn new() -> Self {
         Self {
             inner: Arc::new(HashMap::new()),
         }
     }
 
+    /// Returns the number of entries in the index
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Returns true if the index contains no entries
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Returns an iterator over all key-entry pairs in the index
     pub fn iter(&self) -> impl Iterator<Item = (&Vec<u8>, &IndexEntry)> {
         self.inner.iter()
     }
 
+    /// Gets the index entry for the given key
     pub fn get(&self, key: &[u8]) -> Option<&IndexEntry> {
         self.inner.get(key)
     }
 
+    /// Inserts or updates an entry in the index, returning the previous entry if any
     pub fn upsert(&mut self, key: Vec<u8>, entry: IndexEntry) -> Option<IndexEntry> {
         Arc::make_mut(&mut self.inner).insert(key, entry)
     }
 
+    /// Removes an entry from the index and returns it
     pub fn remove(&mut self, key: &[u8]) -> Option<IndexEntry> {
         Arc::make_mut(&mut self.inner).remove(key)
     }
 
+    /// Creates a read-only snapshot of the index
     pub fn snapshot(&self) -> IndexSnapshot {
         IndexSnapshot {
             inner: Arc::clone(&self.inner),
         }
     }
 
+    /// Rebuilds an index from a builder
     pub fn rebuild(builder: IndexBuilder) -> Self {
         Self {
             inner: Arc::new(builder.entries),
@@ -59,38 +75,46 @@ impl Index {
     }
 }
 
+/// Immutable snapshot of an index for consistent reads
 pub struct IndexSnapshot {
     inner: Arc<HashMap<Vec<u8>, IndexEntry>>,
 }
 
 impl IndexSnapshot {
+    /// Gets the index entry for the given key
     pub fn get(&self, key: &[u8]) -> Option<&IndexEntry> {
         self.inner.get(key)
     }
 
+    /// Returns an iterator over all key-entry pairs in the snapshot
     pub fn iter(&self) -> impl Iterator<Item = (&Vec<u8>, &IndexEntry)> {
         self.inner.iter()
     }
 
+    /// Returns the number of entries in the snapshot
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
+/// Builder for constructing a new index
 #[derive(Default)]
 pub struct IndexBuilder {
     entries: HashMap<Vec<u8>, IndexEntry>,
 }
 
 impl IndexBuilder {
+    /// Creates a new empty index builder
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Inserts an entry into the builder
     pub fn insert(&mut self, key: Vec<u8>, entry: IndexEntry) {
         self.entries.insert(key, entry);
     }
 
+    /// Builds the final index from the accumulated entries
     pub fn build(self) -> Index {
         Index {
             inner: Arc::new(self.entries),

@@ -15,6 +15,7 @@ const USER_PREFIX: &str = "auth/user/";
 const USERNAME_INDEX_PREFIX: &str = "auth/user_by_name/";
 const API_KEY_PREFIX: &str = "auth/apikey/";
 
+/// Service for managing user authentication and API key lifecycle
 pub struct AuthService<E, H, C>
 where
     E: KvEngine,
@@ -33,6 +34,7 @@ where
     H: SecretHasher,
     C: EnvelopeEncryptor,
 {
+    /// Creates a new authentication service with the provided engine, hasher, and encryptor
     pub fn new(engine: E, hasher: H, crypto: C) -> Self {
         Self {
             engine,
@@ -42,10 +44,12 @@ where
         }
     }
 
+    /// Creates a new user with the given username and password
     pub fn create_user(&self, username: &str, password: &str) -> Result<UserRecord> {
         self.create_user_with_metadata(username, password, None)
     }
 
+    /// Creates a new user with the given username, password, and optional encrypted metadata
     pub fn create_user_with_metadata(
         &self,
         username: &str,
@@ -84,6 +88,7 @@ where
         Ok(record)
     }
 
+    /// Verifies a username and password combination, updating last login and failed attempts
     pub fn verify_password(&self, username: &str, password: &str) -> Result<bool> {
         let normalized_username = normalize_username(username);
         if normalized_username.is_empty() {
@@ -110,6 +115,7 @@ where
         Ok(false)
     }
 
+    /// Creates a new API key for the specified user and returns the record and token
     pub fn create_api_key(
         &self,
         user_id: &str,
@@ -118,6 +124,7 @@ where
         self.create_api_key_with_metadata(user_id, label, None)
     }
 
+    /// Creates a new API key with optional label and encrypted metadata
     pub fn create_api_key_with_metadata(
         &self,
         user_id: &str,
@@ -148,6 +155,7 @@ where
         Ok((record, token))
     }
 
+    /// Authenticates an API key token and returns the key record if valid
     pub fn authenticate_api_key(&self, token: &str) -> Result<Option<ApiKeyRecord>> {
         let (key_id, secret) = match token.split_once('.') {
             Some(parts) => parts,
@@ -171,6 +179,7 @@ where
         Ok(Some(record))
     }
 
+    /// Revokes an API key by deleting its record, returning true if the key existed
     pub fn revoke_api_key(&self, key_id: &str) -> Result<bool> {
         if self.load_api_key_record(key_id)?.is_none() {
             return Ok(false);
@@ -189,10 +198,12 @@ where
         }
     }
 
+    /// Decrypts and returns the user's metadata if present
     pub fn decrypt_user_metadata(&self, user: &UserRecord) -> Result<Option<Vec<u8>>> {
         self.decrypt_optional(user.metadata.as_ref())
     }
 
+    /// Decrypts and returns the API key's metadata if present
     pub fn decrypt_api_key_metadata(&self, api_key: &ApiKeyRecord) -> Result<Option<Vec<u8>>> {
         self.decrypt_optional(api_key.metadata.as_ref())
     }
