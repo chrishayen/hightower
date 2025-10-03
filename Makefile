@@ -10,3 +10,7 @@ RUST_LOG ?= debug
 ## Run the application in dev mode with debug logging and a test token
 dev:
 	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- --node
+
+devroot:
+	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- --root
+

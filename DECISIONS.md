@@ -4,6 +4,7 @@ This log records noteworthy decisions made while developing the project. Documen
 
 ## Entries
 
+- **2025-02-20** — Refactored startup flow: common bootstrap runs once, then dispatches to dedicated node/root modules for mode-specific work while main handles shared shutdown.
 - **2025-02-20** — Node mode now generates a random `ht-<adjective>-<noun>-<suffix>` name (suffix length 5) using `hightower-naming` and stores it in KV for reuse.
 - **2025-02-20** — Persist `HT_TOKEN` in the KV store under `secrets/ht_token` for reuse across restarts, accepting plaintext storage until encryption is implemented.
 - **2025-02-20** — Persist node certificates in the key-value store as JSON payloads under `certificates/node` so restarts reuse the same storage layer; revisit encryption later (see TODO).

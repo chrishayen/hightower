@@ -36,7 +36,9 @@ impl Error for KvInitError {
 #[derive(Debug)]
 pub struct KvHandle {
     engine: SingleNodeEngine,
+    #[allow(dead_code)]
     data_dir: PathBuf,
+    #[allow(dead_code)]
     temp_dir: Option<TempDir>,
 }
 
