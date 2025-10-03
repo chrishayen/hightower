@@ -10,3 +10,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 ctrlc = "3"
+hightower-kv = "0.1.1"
+tempfile = "3"

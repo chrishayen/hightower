@@ -1,5 +1,6 @@
 mod certificates;
 mod cli;
+mod kv;
 mod logging;
 mod mode;
 mod node;
@@ -7,6 +8,7 @@ mod shutdown;
 mod token;
 
 use clap::Parser;
+use std::process;
 use tracing::{error, info};
 
 use crate::cli::Cli;
@@ -20,7 +22,12 @@ fn main() {
 
     token::fetch(|key| std::env::var(key)).unwrap_or_else(|err| {
         error!("{}", err);
-        std::process::exit(1);
+        process::exit(1);
+    });
+
+    let _kv = kv::initialize(cli.kv.as_deref()).unwrap_or_else(|err| {
+        error!(?err, "Failed to initialize key-value store");
+        process::exit(1);
     });
 
     if let Mode::Node = mode {

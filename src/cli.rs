@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -7,6 +8,8 @@ pub struct Cli {
     pub node: bool,
     #[arg(long, conflicts_with = "node")]
     pub root: bool,
+    #[arg(long = "kv", value_name = "DIR")]
+    pub kv: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -22,11 +25,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_from_defaults_to_node_flags() {
+    fn parse_from_defaults_flags_and_paths() {
         let cli = parse_from(["hightower"]);
 
         assert!(!cli.root);
         assert!(!cli.node);
+        assert!(cli.kv.is_none());
     }
 
     #[test]
@@ -35,6 +39,7 @@ mod tests {
 
         assert!(cli.root);
         assert!(!cli.node);
+        assert!(cli.kv.is_none());
     }
 
     #[test]
@@ -43,5 +48,13 @@ mod tests {
 
         assert!(!cli.root);
         assert!(cli.node);
+        assert!(cli.kv.is_none());
+    }
+
+    #[test]
+    fn parse_from_accepts_kv_path() {
+        let cli = parse_from(["hightower", "--kv", "/tmp/store"]);
+
+        assert_eq!(cli.kv.as_deref(), Some(std::path::Path::new("/tmp/store")));
     }
 }

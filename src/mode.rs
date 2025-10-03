@@ -19,6 +19,7 @@ mod tests {
         let cli = Cli {
             node: false,
             root: false,
+            kv: None,
         };
 
         assert_eq!(resolve(&cli), Mode::Node);
@@ -29,6 +30,7 @@ mod tests {
         let cli = Cli {
             node: false,
             root: true,
+            kv: None,
         };
 
         assert_eq!(resolve(&cli), Mode::Root);
@@ -39,6 +41,7 @@ mod tests {
         let cli = Cli {
             node: true,
             root: false,
+            kv: None,
         };
 
         assert_eq!(resolve(&cli), Mode::Node);

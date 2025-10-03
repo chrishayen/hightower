@@ -4,6 +4,7 @@ This log records noteworthy decisions made while developing the project. Documen
 
 ## Entries
 
+- **2025-02-20** — Introduced a runtime key-value store initialiser: the app now honours a `--kv` flag for specifying the data directory and otherwise creates a managed temp directory using `hightower-kv`, emitting the resolved location at debug level for troubleshooting.
 - **2025-02-20** — Application now blocks after startup waiting for Ctrl-C in both root and node modes, using a tested shutdown helper to ensure graceful exits.
 - **2025-02-20** — Added a `Makefile` dev target that expects GNU Make (`gmake`) and runs node mode with `HT_TOKEN=test-token` plus `RUST_LOG=debug` to make local debugging a single command.
 - **2025-02-20** — When running in node debug mode we emit WireGuard key material at debug log level to aid diagnostics, logging the generated public and private keys separately as summarised hex (first/last 6 chars).

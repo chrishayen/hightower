@@ -19,6 +19,7 @@ impl NodeCertificate {
         &self.private_key
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn public_key(&self) -> &PublicKey25519 {
         &self.public_key
     }
