@@ -14,6 +14,7 @@ impl NodeCertificate {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn private_key(&self) -> &PrivateKey {
         &self.private_key
     }

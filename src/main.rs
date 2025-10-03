@@ -3,6 +3,7 @@ mod cli;
 mod logging;
 mod mode;
 mod node;
+mod shutdown;
 mod token;
 
 use clap::Parser;
@@ -33,6 +34,12 @@ fn main() {
                 "Running in node mode"
             );
         }
+    }
+
+    info!("Waiting for Ctrl-C to exit");
+    match shutdown::wait_for_ctrl_c() {
+        Ok(()) => info!("Shutdown signal received"),
+        Err(err) => error!(?err, "Failed while waiting for shutdown signal"),
     }
 
     drop(token);
