@@ -4,6 +4,7 @@ This log records noteworthy decisions made while developing the project. Documen
 
 ## Entries
 
+- **2025-02-20** — Node startup now issues WireGuard certificates using the `hightower-wireguard` crate whenever running in node mode, ensuring fresh key material is derived before service work begins.
 - **2025-02-20** — Adopted a modular architecture mandate: each logical component lives in its own file, functions stay small, and every function receives a corresponding test to keep behaviour explicit and verifiable.
 - **2025-02-20** — Enforced presence of the `HT_TOKEN` environment variable for both root and node execution paths; the application now exits early if the token is missing to prevent unauthenticated operation.
 - **2025-02-20** — Initialised the repository as a Rust binary crate (`cargo init --bin`). Provides a conventional Cargo layout with `src/main.rs` as the primary entry point.

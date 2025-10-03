@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.13", features = ["derive"] }
+hightower-wireguard = "0.1.2"

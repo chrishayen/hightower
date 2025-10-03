@@ -1,5 +1,7 @@
+mod certificates;
 mod cli;
 mod mode;
+mod node;
 mod token;
 
 use clap::Parser;
@@ -18,6 +20,12 @@ fn main() {
 
     match mode {
         Mode::Root => println!("Running in root mode"),
-        Mode::Node => println!("Running in node mode"),
+        Mode::Node => {
+            let certificate = node::startup();
+            println!(
+                "Running in node mode. Certificate generated with public key length {}.",
+                certificate.public_key().len()
+            );
+        }
     }
 }

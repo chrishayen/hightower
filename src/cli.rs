@@ -9,17 +9,17 @@ pub struct Cli {
     pub root: bool,
 }
 
-pub fn parse_from<I, T>(args: I) -> Cli
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
-{
-    Cli::parse_from(args)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_from<I, T>(args: I) -> Cli
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        Cli::parse_from(args)
+    }
 
     #[test]
     fn parse_from_defaults_to_node_flags() {
