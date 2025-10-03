@@ -1,11 +1,17 @@
 use thiserror::Error;
 
+/// Cryptographic primitives for WireGuard protocol
 pub mod crypto;
+/// Handshake initiator implementation
 pub mod initiator;
+/// WireGuard message structures
 pub mod messages;
+/// High-level protocol implementation
 pub mod protocol;
+/// Handshake responder implementation
 pub mod responder;
 
+/// Errors that can occur during WireGuard protocol operations
 #[derive(Error, Debug)]
 pub enum WireGuardError {
     #[error("Cryptographic error: {0}")]

@@ -49,7 +49,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-wireguard = "0.1.1"
+hightower-wireguard = "0.1.2"
 ```
 
 ## Usage

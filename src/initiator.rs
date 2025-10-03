@@ -8,7 +8,9 @@ use crate::messages::{
 };
 use crate::{Result, WireGuardError};
 
-/// Session keys derived after successful handshake
+/// Transport keys derived after successful handshake completion
+///
+/// Contains separate keys for sending and receiving encrypted data
 #[derive(Debug, Clone)]
 pub struct SessionKeys {
     pub send_key: [u8; 32],

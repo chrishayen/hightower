@@ -117,7 +117,9 @@ pub fn aead_decrypt(
         .map_err(|_| WireGuardError::AuthenticationFailed)
 }
 
-// TAI64N timestamp for replay protection
+/// Generate TAI64N timestamp for replay protection
+///
+/// Returns a 12-byte timestamp in TAI64N format (8 bytes seconds + 4 bytes nanoseconds)
 pub fn timestamp() -> [u8; 12] {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 

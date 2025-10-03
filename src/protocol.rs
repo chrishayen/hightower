@@ -6,26 +6,35 @@ use crate::{Result, WireGuardError};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-/// Information about a peer
+/// Configuration and metadata for a WireGuard peer
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
+    /// Peer's public key for authentication and key derivation
     pub public_key: PublicKey25519,
+    /// Optional preshared key for additional security
     pub preshared_key: Option<[u8; 32]>,
+    /// Network endpoint (IP address and port) for the peer
     pub endpoint: Option<SocketAddr>,
+    /// IP ranges allowed for this peer (IP address and prefix length)
     pub allowed_ips: Vec<(std::net::IpAddr, u8)>, // IP and prefix length
+    /// Interval in seconds for keepalive packets
     pub persistent_keepalive: Option<u16>,
 }
 
-/// Active session with transport keys
+/// Active cryptographic session with established transport keys
 #[derive(Debug, Clone)]
 pub struct ActiveSession {
+    /// Transport keys for encrypting/decrypting data
     pub keys: SessionKeys,
+    /// Public key of the peer this session is with
     pub peer_public_key: PublicKey25519,
+    /// Timestamp when this session was created
     pub created_at: std::time::Instant,
+    /// Timestamp of last activity on this session
     pub last_used: std::time::Instant,
 }
 
-/// Main WireGuard protocol handler
+/// Main WireGuard protocol handler managing peers and sessions
 pub struct WireGuardProtocol {
     local_private_key: PrivateKey,
     local_public_key: PublicKey25519,
@@ -188,17 +197,23 @@ impl WireGuardProtocol {
         self.active_sessions.get(&sender_id)
     }
 
-    /// Get all active sessions
+    /// Get a reference to all active sessions
+    ///
+    /// Returns a map of session IDs to active sessions
     pub fn active_sessions(&self) -> &HashMap<u32, ActiveSession> {
         &self.active_sessions
     }
 
-    /// Get all configured peers
+    /// Get a reference to all configured peers
+    ///
+    /// Returns a map of public keys to peer information
     pub fn peers(&self) -> &HashMap<PublicKey25519, PeerInfo> {
         &self.peers
     }
 
-    /// Clean up expired sessions and pending handshakes
+    /// Remove expired sessions and stale pending handshakes
+    ///
+    /// Should be called periodically to prevent resource leaks
     pub fn cleanup(&mut self) {
         let now = std::time::Instant::now();
         let session_timeout = std::time::Duration::from_secs(180); // 3 minutes
