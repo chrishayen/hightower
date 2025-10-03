@@ -4,6 +4,7 @@ mod kv;
 mod logging;
 mod mode;
 mod node;
+mod node_name;
 mod shutdown;
 mod token;
 
@@ -16,6 +17,7 @@ use crate::certificates::NodeCertificate;
 use crate::cli::Cli;
 use crate::mode::Mode;
 
+const NODE_NAME_KEY: &[u8] = b"nodes/name";
 const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
 const HT_TOKEN_KEY: &[u8] = b"secrets/ht_token";
 
@@ -38,8 +40,20 @@ fn main() {
     persist_token(&kv, HT_TOKEN_KEY, &token);
 
     if let Mode::Node = mode {
+        let node_name = node_name::generate();
+        persist_node_name(&kv, NODE_NAME_KEY, &node_name);
+        info!("Node identity established: {}", node_name);
         let certificate = node::startup();
         persist_certificate(&kv, NODE_CERTIFICATE_KEY, &certificate);
+    } else {
+        match kv.get_bytes(NODE_NAME_KEY) {
+            Ok(Some(stored_name)) => match String::from_utf8(stored_name) {
+                Ok(name) => info!("Node name available from KV: {}", name),
+                Err(err) => info!(?err, "Node name in KV is not valid UTF-8"),
+            },
+            Ok(None) => info!("Node name not set"),
+            Err(err) => info!(?err, "Failed to read node name from KV"),
+        }
     }
 
     info!("Waiting for Ctrl-C to exit");
@@ -63,6 +77,14 @@ fn persist_certificate(kv: &kv::KvHandle, key: &[u8], certificate: &NodeCertific
 
 fn persist_token(kv: &kv::KvHandle, key: &[u8], token: &str) {
     kv.put_secret(key, token.as_bytes());
+}
+
+fn persist_node_name(kv: &kv::KvHandle, key: &[u8], node_name: &str) {
+    kv.put_bytes(key, node_name.as_bytes())
+        .unwrap_or_else(|err| {
+            error!(?err, "Failed to store node name");
+            process::exit(1);
+        });
 }
 
 #[cfg(test)]
@@ -101,5 +123,21 @@ mod tests {
             .expect("kv read succeeded")
             .expect("value present");
         assert_eq!(stored, token.as_bytes());
+    }
+
+    #[test]
+    fn persist_node_name_writes_bytes() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = kv::initialize(Some(temp.path())).expect("kv init");
+        let key = b"nodes/test_name";
+        let name = "ht-brave-tiger-abcde";
+
+        persist_node_name(&kv, key, name);
+
+        let stored = kv
+            .get_bytes(key)
+            .expect("kv read succeeded")
+            .expect("value present");
+        assert_eq!(stored, name.as_bytes());
     }
 }
