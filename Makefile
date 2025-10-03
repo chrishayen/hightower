@@ -9,8 +9,11 @@ RUST_LOG ?= debug
 .PHONY: dev
 ## Run the application in dev mode with debug logging and a test token
 dev:
-	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- --node
+	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- dev
 
 devroot:
-	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- --root
+	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- root
+
+devnode:
+	HT_TOKEN=$(HT_TOKEN) RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -- node
 

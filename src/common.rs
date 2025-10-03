@@ -1,22 +1,96 @@
-use crate::cli::Cli;
+use crate::cli::{Cli, ModeArg};
 use crate::kv::{self, KvHandle};
 use crate::token;
+use std::borrow::Cow;
 use std::env::VarError;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
 pub const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
 pub const HT_TOKEN_KEY: &[u8] = b"secrets/ht_token";
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CommonContext {
-    pub kv: KvHandle,
+    pub kv: NamespacedKv,
 }
 
 impl CommonContext {
     pub fn new(kv: KvHandle) -> Self {
-        Self { kv }
+        Self {
+            kv: NamespacedKv::from_handle(kv),
+        }
+    }
+
+    pub fn namespaced(&self, prefix: &[u8]) -> Self {
+        Self {
+            kv: self.kv.clone_with_additional_prefix(prefix),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NamespacedKv {
+    inner: Arc<KvHandle>,
+    prefix: Option<Vec<u8>>,
+}
+
+impl NamespacedKv {
+    pub fn from_handle(kv: KvHandle) -> Self {
+        Self {
+            inner: Arc::new(kv),
+            prefix: None,
+        }
+    }
+
+    fn with_parts(inner: Arc<KvHandle>, prefix: Option<Vec<u8>>) -> Self {
+        Self { inner, prefix }
+    }
+
+    pub fn clone_with_additional_prefix(&self, additional: &[u8]) -> Self {
+        let prefix = match &self.prefix {
+            Some(existing) => {
+                let mut composed = existing.clone();
+                if !existing.is_empty() {
+                    composed.push(b'/');
+                }
+                composed.extend_from_slice(additional);
+                composed
+            }
+            None => additional.to_vec(),
+        };
+
+        Self::with_parts(Arc::clone(&self.inner), Some(prefix))
+    }
+
+    pub fn put_bytes(&self, key: &[u8], value: &[u8]) -> Result<(), hightower_kv::Error> {
+        let key = self.prefixed_key(key);
+        self.inner.put_bytes(key.as_ref(), value)
+    }
+
+    pub fn put_secret(&self, key: &[u8], value: &[u8]) {
+        let key = self.prefixed_key(key);
+        self.inner.put_secret(key.as_ref(), value);
+    }
+
+    pub fn get_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, hightower_kv::Error> {
+        let key = self.prefixed_key(key);
+        self.inner.get_bytes(key.as_ref())
+    }
+
+    fn prefixed_key<'a>(&self, key: &'a [u8]) -> Cow<'a, [u8]> {
+        match &self.prefix {
+            Some(prefix) if !prefix.is_empty() => {
+                let mut composed = Vec::with_capacity(prefix.len() + 1 + key.len());
+                composed.extend_from_slice(prefix);
+                composed.push(b'/');
+                composed.extend_from_slice(key);
+                Cow::Owned(composed)
+            }
+            Some(_) => Cow::Borrowed(key),
+            None => Cow::Borrowed(key),
+        }
     }
 }
 
@@ -54,8 +128,9 @@ where
 {
     let token = token::fetch(|key| lookup(key)).map_err(CommonError::Token)?;
     let kv = kv::initialize(cli.kv.as_deref()).map_err(CommonError::Kv)?;
-    kv.put_secret(HT_TOKEN_KEY, token.as_bytes());
-    Ok(CommonContext::new(kv))
+    let context = CommonContext::new(kv);
+    context.kv.put_secret(HT_TOKEN_KEY, token.as_bytes());
+    Ok(context)
 }
 
 #[cfg(test)]
@@ -67,8 +142,7 @@ mod tests {
     fn prepare_returns_context_and_persists_token() {
         let temp = TempDir::new().expect("tempdir");
         let cli = Cli {
-            node: true,
-            root: false,
+            mode: ModeArg::Node,
             kv: Some(temp.path().to_path_buf()),
         };
 

@@ -72,4 +72,23 @@ mod tests {
             serde_json::from_slice(&cert_bytes).expect("certificate deserializes");
         assert_eq!(certificate.public_key().len(), 32);
     }
+
+    #[test]
+    fn run_uses_namespace_prefix_when_present() {
+        let base = context();
+        let namespaced = base.namespaced(b"node");
+
+        run(&namespaced);
+
+        let stored = base
+            .kv
+            .get_bytes(b"node/nodes/name")
+            .expect("kv read")
+            .expect("value present");
+        let stored = String::from_utf8(stored).expect("utf-8");
+        assert!(stored.starts_with("ht-"));
+
+        let unprefixed = base.kv.get_bytes(NODE_NAME_KEY).expect("kv read");
+        assert!(unprefixed.is_none());
+    }
 }

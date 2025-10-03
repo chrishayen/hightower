@@ -1,13 +1,18 @@
-use crate::cli::Cli;
+use crate::cli::{Cli, ModeArg};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
     Node,
     Root,
+    Dev,
 }
 
 pub fn resolve(cli: &Cli) -> Mode {
-    if cli.root { Mode::Root } else { Mode::Node }
+    match cli.mode {
+        ModeArg::Node => Mode::Node,
+        ModeArg::Root => Mode::Root,
+        ModeArg::Dev => Mode::Dev,
+    }
 }
 
 #[cfg(test)]
@@ -17,8 +22,7 @@ mod tests {
     #[test]
     fn resolve_returns_node_when_root_flag_absent() {
         let cli = Cli {
-            node: false,
-            root: false,
+            mode: ModeArg::Node,
             kv: None,
         };
 
@@ -28,8 +32,7 @@ mod tests {
     #[test]
     fn resolve_prefers_root_when_flag_set() {
         let cli = Cli {
-            node: false,
-            root: true,
+            mode: ModeArg::Root,
             kv: None,
         };
 
@@ -39,11 +42,20 @@ mod tests {
     #[test]
     fn resolve_retains_node_when_flag_set() {
         let cli = Cli {
-            node: true,
-            root: false,
+            mode: ModeArg::Node,
             kv: None,
         };
 
         assert_eq!(resolve(&cli), Mode::Node);
+    }
+
+    #[test]
+    fn resolve_prefers_dev_when_flag_set() {
+        let cli = Cli {
+            mode: ModeArg::Dev,
+            kv: None,
+        };
+
+        assert_eq!(resolve(&cli), Mode::Dev);
     }
 }

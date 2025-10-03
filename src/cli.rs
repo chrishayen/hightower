@@ -1,15 +1,20 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    #[arg(long, conflicts_with = "root")]
-    pub node: bool,
-    #[arg(long, conflicts_with = "node")]
-    pub root: bool,
+    #[arg(value_enum, value_name = "MODE", default_value_t = ModeArg::Node)]
+    pub mode: ModeArg,
     #[arg(long = "kv", value_name = "DIR")]
     pub kv: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, ValueEnum, PartialEq, Eq)]
+pub enum ModeArg {
+    Node,
+    Root,
+    Dev,
 }
 
 #[cfg(test)]
@@ -28,26 +33,31 @@ mod tests {
     fn parse_from_defaults_flags_and_paths() {
         let cli = parse_from(["hightower"]);
 
-        assert!(!cli.root);
-        assert!(!cli.node);
+        assert_eq!(cli.mode, ModeArg::Node);
         assert!(cli.kv.is_none());
     }
 
     #[test]
-    fn parse_from_allows_root_flag() {
-        let cli = parse_from(["hightower", "--root"]);
+    fn parse_from_allows_root_mode() {
+        let cli = parse_from(["hightower", "root"]);
 
-        assert!(cli.root);
-        assert!(!cli.node);
+        assert_eq!(cli.mode, ModeArg::Root);
         assert!(cli.kv.is_none());
     }
 
     #[test]
-    fn parse_from_allows_node_flag() {
-        let cli = parse_from(["hightower", "--node"]);
+    fn parse_from_allows_node_mode() {
+        let cli = parse_from(["hightower", "node"]);
 
-        assert!(!cli.root);
-        assert!(cli.node);
+        assert_eq!(cli.mode, ModeArg::Node);
+        assert!(cli.kv.is_none());
+    }
+
+    #[test]
+    fn parse_from_allows_dev_mode() {
+        let cli = parse_from(["hightower", "dev"]);
+
+        assert_eq!(cli.mode, ModeArg::Dev);
         assert!(cli.kv.is_none());
     }
 
