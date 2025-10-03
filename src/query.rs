@@ -25,6 +25,19 @@ pub async fn query(socket: &Socket, hostname: &str, domain: &str) {
 }
 
 /// Listen for and respond to mDNS queries
+///
+/// This function continuously listens for incoming mDNS packets, responding to queries
+/// for the specified name and forwarding discovered peers to the provided channels.
+///
+/// # Arguments
+///
+/// * `socket` - The socket to receive mDNS packets on
+/// * `send_socket` - The socket to send mDNS responses on
+/// * `name` - The hostname to respond to (without domain suffix)
+/// * `domain` - The domain to use
+/// * `ip` - The IP address to advertise for this host
+/// * `discoveries` - Channel to send newly discovered peers to
+/// * `responses` - Channel to send all mDNS responses to (including discoveries)
 pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, discoveries: mpsc::Sender<MdnsResponse>, responses: mpsc::Sender<MdnsResponse>) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 

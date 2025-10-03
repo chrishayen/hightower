@@ -1,11 +1,37 @@
 use std::net::Ipv4Addr;
 
 /// Build a simple mDNS A record response packet
+///
+/// Creates an mDNS response packet advertising the given hostname and IP address
+/// with a default TTL of 120 seconds.
+///
+/// # Arguments
+///
+/// * `name` - The hostname (without domain suffix)
+/// * `domain` - The domain to use
+/// * `ip` - The IPv4 address to advertise
+///
+/// # Returns
+///
+/// A byte vector containing the complete mDNS response packet
 pub fn build_mdns_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
     build_mdns_packet_with_ttl(name, domain, ip, 120)
 }
 
 /// Build a goodbye packet (TTL = 0)
+///
+/// Creates an mDNS goodbye packet to announce that a service is shutting down.
+/// This is the same as a regular response but with TTL set to 0.
+///
+/// # Arguments
+///
+/// * `name` - The hostname (without domain suffix)
+/// * `domain` - The domain to use
+/// * `ip` - The IPv4 address being removed
+///
+/// # Returns
+///
+/// A byte vector containing the complete mDNS goodbye packet
 pub fn build_goodbye_packet(name: &str, domain: &str, ip: Ipv4Addr) -> Vec<u8> {
     build_mdns_packet_with_ttl(name, domain, ip, 0)
 }
@@ -49,6 +75,17 @@ fn build_mdns_packet_with_ttl(name: &str, domain: &str, ip: Ipv4Addr, ttl: u32) 
 }
 
 /// Build an mDNS query packet
+///
+/// Creates an mDNS query packet to search for a specific hostname on the network.
+///
+/// # Arguments
+///
+/// * `name` - The hostname to query (without domain suffix)
+/// * `domain` - The domain to use
+///
+/// # Returns
+///
+/// A byte vector containing the complete mDNS query packet
 pub fn build_mdns_query(name: &str, domain: &str) -> Vec<u8> {
     let mut packet = Vec::new();
 
@@ -78,6 +115,16 @@ pub fn build_mdns_query(name: &str, domain: &str) -> Vec<u8> {
 }
 
 /// Parse an mDNS query packet and extract the queried name
+///
+/// Parses an incoming mDNS query packet and extracts the hostname being queried.
+///
+/// # Arguments
+///
+/// * `packet` - The raw mDNS packet data
+///
+/// # Returns
+///
+/// The queried hostname as a string, or `None` if the packet is invalid or not a query
 pub fn parse_mdns_query(packet: &[u8]) -> Option<String> {
     if packet.len() < 12 {
         return None;
@@ -126,6 +173,18 @@ pub fn parse_mdns_query(packet: &[u8]) -> Option<String> {
 }
 
 /// Parse an mDNS response/announcement packet and extract hostname and IP address
+///
+/// Parses an incoming mDNS response or announcement packet and extracts the hostname
+/// and IPv4 address from the first A record.
+///
+/// # Arguments
+///
+/// * `packet` - The raw mDNS packet data
+///
+/// # Returns
+///
+/// A tuple of (hostname, IP address), or `None` if the packet is invalid, not a response,
+/// or doesn't contain a valid A record
 pub fn parse_mdns_response(packet: &[u8]) -> Option<(String, Ipv4Addr)> {
     if packet.len() < 12 {
         return None;

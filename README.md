@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-mdns = "0.1.2"
+hightower-mdns = "0.1.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 ```
 
@@ -198,6 +198,9 @@ Multicast DNS (mDNS) enables DNS-like hostname resolution on a local network wit
 - IPv6 support (AAAA records)
 - TTL-based cache management
 - Multiple questions/answers per packet
+## License
+
+[Add your license here]
 - Truncation handling
 - DNS compression pointer handling in queries
 
