@@ -1,3 +1,4 @@
+/// List of adjectives used for generating random names.
 pub const ADJECTIVES: &[&str] = &[
     "alpha",
     "sigma",

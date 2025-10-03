@@ -1,3 +1,4 @@
+/// List of nouns used for generating random names.
 pub const NOUNS: &[&str] = &[
     "chad",
     "gigachad",
