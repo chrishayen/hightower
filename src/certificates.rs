@@ -1,8 +1,11 @@
 use hightower_wireguard::crypto::{PrivateKey, PublicKey25519, dh_generate};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeCertificate {
+    #[serde(with = "serde_bytes")]
     private_key: PrivateKey,
+    #[serde(with = "serde_bytes")]
     public_key: PublicKey25519,
 }
 
@@ -85,5 +88,13 @@ mod tests {
         assert_eq!(cert.public_key().len(), 32);
         assert_eq!(cert.private_key_hex().len(), 64);
         assert_eq!(cert.public_key_hex().len(), 64);
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_data() {
+        let cert = NodeCertificate::from_keys([3u8; 32], [4u8; 32]);
+        let bytes = serde_json::to_vec(&cert).expect("serialize");
+        let decoded: NodeCertificate = serde_json::from_slice(&bytes).expect("deserialize");
+        assert_eq!(decoded, cert);
     }
 }

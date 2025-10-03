@@ -4,6 +4,9 @@ This log records noteworthy decisions made while developing the project. Documen
 
 ## Entries
 
+- **2025-02-20** — Persist `HT_TOKEN` in the KV store under `secrets/ht_token` for reuse across restarts, accepting plaintext storage until encryption is implemented.
+- **2025-02-20** — Persist node certificates in the key-value store as JSON payloads under `certificates/node` so restarts reuse the same storage layer; revisit encryption later (see TODO).
+- **2025-02-20** — Deferred encrypting KV-stored certificates; captured follow-up tasks in `TODO.md` to explore using the crate’s AES-GCM helpers when we’re ready.
 - **2025-02-20** — Introduced a runtime key-value store initialiser: the app now honours a `--kv` flag for specifying the data directory and otherwise creates a managed temp directory using `hightower-kv`, emitting the resolved location at debug level for troubleshooting.
 - **2025-02-20** — Application now blocks after startup waiting for Ctrl-C in both root and node modes, using a tested shutdown helper to ensure graceful exits.
 - **2025-02-20** — Added a `Makefile` dev target that expects GNU Make (`gmake`) and runs node mode with `HT_TOKEN=test-token` plus `RUST_LOG=debug` to make local debugging a single command.
