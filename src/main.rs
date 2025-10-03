@@ -1,36 +1,23 @@
+mod cli;
+mod mode;
+mod token;
+
 use clap::Parser;
-use std::env;
-use std::process;
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    #[arg(long, conflicts_with = "root")]
-    node: bool,
-    #[arg(long, conflicts_with = "node")]
-    root: bool,
-}
-
-enum Mode {
-    Node,
-    Root,
-}
+use crate::cli::Cli;
+use crate::mode::Mode;
 
 fn main() {
     let cli = Cli::parse();
-    let mode = if cli.root { Mode::Root } else { Mode::Node };
+    let mode = mode::resolve(&cli);
 
-    let _token = require_token();
+    let _token = token::fetch(|key| std::env::var(key)).unwrap_or_else(|err| {
+        eprintln!("{}", err);
+        std::process::exit(1);
+    });
 
     match mode {
         Mode::Root => println!("Running in root mode"),
         Mode::Node => println!("Running in node mode"),
     }
-}
-
-fn require_token() -> String {
-    env::var("HT_TOKEN").unwrap_or_else(|_| {
-        eprintln!("HT_TOKEN environment variable must be set when running in root or node mode.");
-        process::exit(1);
-    })
 }

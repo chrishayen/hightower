@@ -4,6 +4,7 @@ This log records noteworthy decisions made while developing the project. Documen
 
 ## Entries
 
+- **2025-02-20** — Adopted a modular architecture mandate: each logical component lives in its own file, functions stay small, and every function receives a corresponding test to keep behaviour explicit and verifiable.
 - **2025-02-20** — Enforced presence of the `HT_TOKEN` environment variable for both root and node execution paths; the application now exits early if the token is missing to prevent unauthenticated operation.
 - **2025-02-20** — Initialised the repository as a Rust binary crate (`cargo init --bin`). Provides a conventional Cargo layout with `src/main.rs` as the primary entry point.
 - **2025-02-20** — Adopted the `clap` crate (v4 with `derive`) for CLI parsing. Gives structured argument handling, help generation, and an easy path for environment variable integration. Introduced mutually exclusive `--node` and `--root` flags with node as the default behaviour to reflect the expected primary use case.
