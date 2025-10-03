@@ -13,7 +13,8 @@ mod token;
 
 use clap::Parser;
 use std::process;
-use tracing::{error, info};
+use std::time::Duration;
+use tracing::{debug, error, info};
 
 use crate::cli::Cli;
 use crate::common::{CommonContext, HT_AUTH_KEY};
@@ -54,8 +55,8 @@ fn run_dev_mode(base_context: &CommonContext) {
     replicate_token(base_context, &node_context);
     replicate_token(base_context, &root_context);
 
+    ensure_root_ready(&root_context);
     node_startup::run(&node_context);
-    root_startup::run(&root_context);
 }
 
 fn replicate_token(source: &CommonContext, target: &CommonContext) {
@@ -64,6 +65,34 @@ fn replicate_token(source: &CommonContext, target: &CommonContext) {
         Ok(None) => tracing::warn!("HT auth key missing; skipping namespace propagation"),
         Err(err) => tracing::error!(?err, "Failed to read HT auth key for namespace propagation"),
     }
+}
+
+fn ensure_root_ready(root_context: &CommonContext) {
+    debug!("Starting root API in dev mode");
+    root_startup::run(root_context);
+    let timeout = Duration::from_secs(5);
+
+    debug!(?timeout, "Waiting for root API readiness in dev mode");
+    match root_startup::wait_until_ready(timeout) {
+        Ok(()) => {}
+        Err(root_startup::WaitForRootError::Timeout(duration)) => {
+            error!(
+                ?duration,
+                "Root API timed out before becoming ready in dev mode"
+            );
+            process::exit(1);
+        }
+        Err(root_startup::WaitForRootError::Io(io_err)) => {
+            error!(error = %io_err, "Root API readiness check failed in dev mode");
+            process::exit(1);
+        }
+        Err(root_startup::WaitForRootError::InvalidResponse(line)) => {
+            error!(%line, "Root API returned unexpected response during readiness check");
+            process::exit(1);
+        }
+    }
+
+    debug!("Root API readiness confirmed");
 }
 
 #[cfg(test)]

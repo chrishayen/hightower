@@ -7,7 +7,7 @@ use tracing::info;
 pub fn run(context: &CommonContext) {
     let node_name = node_name::generate();
     persist_node_name(context, &node_name);
-    info!("Node identity established: {}", node_name);
+    info!("Node running as {}", node_name);
 
     let certificate = node::startup();
     persist_certificate(context, &certificate);
