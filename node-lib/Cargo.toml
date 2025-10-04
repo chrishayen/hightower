@@ -1,0 +1,16 @@
+[package]
+name = "hightower-node"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hightower-context = { path = "../context" }
+hightower-root-client = { path = "../root-client" }
+hightower-naming = { workspace = true }
+hightower-wireguard = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+tracing = { workspace = true }
+tempfile = { workspace = true }

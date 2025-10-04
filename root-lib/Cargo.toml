@@ -1,0 +1,8 @@
+[package]
+name = "hightower-root"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hightower-context = { path = "../context" }
+hightower-root-api = { path = "../root-api" }

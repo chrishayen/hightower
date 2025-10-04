@@ -1,11 +1,15 @@
-use crate::cli::{Cli, ModeArg};
-use crate::kv::{self, KvHandle};
-use crate::token;
 use std::borrow::Cow;
 use std::env::VarError;
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
+
+mod kv;
+mod token;
+
+pub use kv::{KvHandle, KvInitError, initialize as initialize_kv};
+pub use token::{TokenError, fetch as fetch_token};
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
 pub const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
@@ -95,39 +99,45 @@ impl NamespacedKv {
 }
 
 #[derive(Debug)]
-pub enum CommonError {
-    Token(token::TokenError),
-    Kv(kv::KvInitError),
+pub enum ContextError {
+    Token(TokenError),
+    Kv(KvInitError),
 }
 
-impl fmt::Display for CommonError {
+impl fmt::Display for ContextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CommonError::Token(err) => write!(f, "failed to read HT_AUTH_KEY: {}", err),
-            CommonError::Kv(err) => write!(f, "failed to initialize key-value store: {}", err),
+            ContextError::Token(err) => write!(f, "failed to read HT_AUTH_KEY: {}", err),
+            ContextError::Kv(err) => write!(f, "failed to initialize key-value store: {}", err),
         }
     }
 }
 
-impl Error for CommonError {
+impl Error for ContextError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            CommonError::Token(err) => Some(err),
-            CommonError::Kv(err) => Some(err),
+            ContextError::Token(err) => Some(err),
+            ContextError::Kv(err) => Some(err),
         }
     }
 }
 
-pub fn prepare(cli: &Cli) -> Result<CommonContext, CommonError> {
-    prepare_with_token_source(cli, |key| std::env::var(key))
-}
-
-pub fn prepare_with_token_source<F>(cli: &Cli, mut lookup: F) -> Result<CommonContext, CommonError>
+pub fn initialize_with_token_source<F>(
+    kv_path: Option<&Path>,
+    mut lookup: F,
+) -> Result<CommonContext, ContextError>
 where
     F: FnMut(&str) -> Result<String, VarError>,
 {
-    let token = token::fetch(|key| lookup(key)).map_err(CommonError::Token)?;
-    let kv = kv::initialize(cli.kv.as_deref()).map_err(CommonError::Kv)?;
+    let token = token::fetch(|key| lookup(key)).map_err(ContextError::Token)?;
+    initialize_with_token(kv_path, token)
+}
+
+pub fn initialize_with_token(
+    kv_path: Option<&Path>,
+    token: String,
+) -> Result<CommonContext, ContextError> {
+    let kv = kv::initialize(kv_path).map_err(ContextError::Kv)?;
     let context = CommonContext::new(kv);
     context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
     Ok(context)
@@ -136,23 +146,27 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env::VarError;
     use tempfile::TempDir;
 
     #[test]
-    fn prepare_returns_context_and_persists_token() {
+    fn initialize_with_token_source_persists_token() {
         let temp = TempDir::new().expect("tempdir");
-        let cli = Cli {
-            mode: ModeArg::Node,
-            kv: Some(temp.path().to_path_buf()),
-        };
+        let context = initialize_with_token_source(Some(temp.path()), |_| Ok("test-auth".into()))
+            .expect("initialize");
 
-        let context = prepare_with_token_source(&cli, |_| Ok("test-auth-key".into()))
-            .expect("prepare succeeds");
         let stored = context
             .kv
             .get_bytes(HT_AUTH_KEY)
             .expect("kv read")
             .expect("value present");
-        assert_eq!(stored, b"test-auth-key");
+        assert_eq!(stored, b"test-auth");
+    }
+
+    #[test]
+    fn initialize_with_token_source_reports_missing_token() {
+        let error = initialize_with_token_source(None, |_| Err(VarError::NotPresent))
+            .expect_err("missing token");
+        assert!(matches!(error, ContextError::Token(TokenError::Missing)));
     }
 }

@@ -1,0 +1,9 @@
+[package]
+name = "hightower-context"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hightower-kv = { workspace = true }
+tempfile = { workspace = true }
+tracing = { workspace = true }

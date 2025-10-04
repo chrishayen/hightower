@@ -1,0 +1,18 @@
+[package]
+name = "hightower-root-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hightower-context = { path = "../context" }
+hightower-kv = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+subtle = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
