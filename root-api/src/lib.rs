@@ -76,12 +76,16 @@ pub fn start(context: &CommonContext) {
     });
 }
 
-async fn start_server(shared_kv: Arc<RwLock<NamespacedKv>>) -> Result<(), BoxError> {
-    let addr: SocketAddr = API_ADDRESS.parse().expect("valid socket address");
-    let app = Router::new()
+fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>) -> Router {
+    Router::new()
         .route("/", get(root_health))
         .route("/nodes", post(register_node))
-        .with_state(ApiState { kv: shared_kv });
+        .with_state(ApiState { kv: shared_kv })
+}
+
+async fn start_server(shared_kv: Arc<RwLock<NamespacedKv>>) -> Result<(), BoxError> {
+    let addr: SocketAddr = API_ADDRESS.parse().expect("valid socket address");
+    let app = build_router(shared_kv);
     let listener = TcpListener::bind(addr).await?;
 
     info!(address = %addr, "Root API ready");
@@ -315,6 +319,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
     use hightower_context::{CommonContext, HT_AUTH_KEY, initialize_kv};
+    use std::sync::mpsc;
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
 
@@ -328,6 +333,74 @@ mod tests {
         start(&ctx);
 
         wait_until_ready(Duration::from_secs(1)).expect("root ready");
+    }
+
+    #[test]
+    fn http_root_registrar_registers_against_running_api() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
+
+        let shared_kv = Arc::new(RwLock::new(context.kv.clone()));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        let server_thread = std::thread::spawn({
+            let shared_kv = Arc::clone(&shared_kv);
+            move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+
+                runtime.block_on(async move {
+                    let router = build_router(shared_kv);
+                    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                        .await
+                        .expect("bind api listener");
+                    let addr = listener.local_addr().expect("listener address");
+                    ready_tx.send(addr).expect("announce listener address");
+
+                    axum::serve(listener, router)
+                        .with_graceful_shutdown(async {
+                            let _ = shutdown_rx.await;
+                        })
+                        .await
+                        .expect("serve api");
+                });
+            }
+        });
+
+        let addr = ready_rx.recv().expect("receive listener address");
+        let endpoint = format!("http://{addr}/nodes");
+        context
+            .kv
+            .put_bytes(ROOT_ENDPOINT_KEY, endpoint.as_bytes())
+            .expect("store custom root endpoint");
+
+        let registrar = HttpRootRegistrar::default();
+        let node_id = "ht-node-integration";
+        let public_key_hex =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        registrar
+            .register(&context, node_id, public_key_hex)
+            .expect("http registrar registers against api");
+
+        let key = registration_storage_key(node_id);
+        let stored = context
+            .kv
+            .get_bytes(key.as_ref())
+            .expect("kv read")
+            .expect("registration stored");
+        let decoded: NodeRegistrationRequest =
+            serde_json::from_slice(&stored).expect("decode registration");
+        assert_eq!(decoded.node_id, node_id);
+        assert_eq!(decoded.public_key_hex, public_key_hex);
+
+        shutdown_tx.send(()).expect("shutdown api server");
+        server_thread.join().expect("server thread join");
     }
 
     #[tokio::test]
