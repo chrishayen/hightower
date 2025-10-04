@@ -51,20 +51,20 @@ fn run_dev_mode(base_context: &CommonContext) -> Result<(), AppError> {
 
     debug!(?timeout, "Waiting for root API readiness in dev mode");
     match hightower_root::wait_until_ready(timeout) {
-        Ok(()) => debug!("Root API readiness confirmed"),
+        Ok(()) => debug!("Root web readiness confirmed"),
         Err(err) => {
             match &err {
                 WaitForRootError::Timeout(duration) => {
                     error!(
                         ?duration,
-                        "Root API timed out before becoming ready in dev mode"
+                        "Root web timed out before becoming ready in dev mode"
                     );
                 }
                 WaitForRootError::Io(io_err) => {
-                    error!(error = %io_err, "Root API readiness check failed in dev mode");
+                    error!(error = %io_err, "Root web readiness check failed in dev mode");
                 }
                 WaitForRootError::InvalidResponse(line) => {
-                    error!(%line, "Root API returned unexpected response during readiness check");
+                    error!(%line, "Root web returned unexpected response during readiness check");
                 }
             }
             return Err(AppError::RootReady(err));
@@ -108,7 +108,7 @@ mod tests {
     use crate::mode::Mode;
     use hightower_context::{CommonContext, NODE_CERTIFICATE_KEY, NODE_NAME_KEY, initialize_kv};
     use hightower_node::NodeCertificate;
-    use hightower_root_api::ROOT_ENDPOINT_KEY;
+    use hightower_root_web::ROOT_ENDPOINT_KEY;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -191,8 +191,8 @@ mod tests {
     fn run_mode_propagates_endpoint_override_in_node_mode() {
         let ctx = context();
         ctx.kv.put_secret(HT_AUTH_KEY, b"test-auth-key");
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind stub root api");
-        let endpoint = format!("http://{}/nodes", listener.local_addr().expect("addr"));
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind stub root web");
+        let endpoint = format!("http://{}/api/nodes", listener.local_addr().expect("addr"));
         ctx.kv
             .put_bytes(ROOT_ENDPOINT_KEY, endpoint.as_bytes())
             .expect("store endpoint override");
@@ -233,7 +233,7 @@ mod tests {
             .recv_timeout(StdDuration::from_secs(1))
             .expect("node registration request captured");
         let request = String::from_utf8_lossy(&request);
-        assert!(request.contains("POST /nodes"));
+        assert!(request.contains("POST /api/nodes"));
         assert!(
             request
                 .to_ascii_lowercase()

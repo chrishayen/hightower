@@ -1,4 +1,5 @@
 pub mod client;
+mod ui;
 
 pub use client::{
     default_registrar,
@@ -43,21 +44,21 @@ struct ApiState {
 }
 
 pub fn start(context: &CommonContext) {
-    debug!("Root API starting");
+    debug!("Root web starting");
 
     let shared_kv = API_SHARED_KV
         .get_or_init(|| Arc::new(RwLock::new(context.kv.clone())))
         .clone();
 
     {
-        let mut guard = shared_kv.write().expect("root api shared kv write lock");
+        let mut guard = shared_kv.write().expect("root web shared kv write lock");
         *guard = context.kv.clone();
     }
 
     API_LAUNCH.get_or_init(|| {
         let dispatcher = dispatcher::get_default(|current| current.clone());
         thread::Builder::new()
-            .name("root-api".into())
+            .name("root-web".into())
             .spawn({
                 let kv_for_thread = shared_kv.clone();
                 let dispatcher = dispatcher.clone();
@@ -66,24 +67,25 @@ pub fn start(context: &CommonContext) {
                         let runtime = Builder::new_current_thread()
                             .enable_all()
                             .build()
-                            .expect("root api runtime");
+                            .expect("root web runtime");
 
                         runtime.block_on(async {
                             if let Err(err) = start_server(kv_for_thread).await {
-                                error!(?err, "Root API server terminated unexpectedly");
+                                error!(?err, "Root web server terminated unexpectedly");
                             }
                         });
                     });
                 }
             })
-            .expect("spawn root api thread");
+            .expect("spawn root web thread");
     });
 }
 
 fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>) -> Router {
     Router::new()
-        .route("/", get(root_health))
-        .route("/nodes", post(register_node))
+        .route("/", get(ui::index))
+        .route("/api/health", get(root_health))
+        .route("/api/nodes", post(register_node))
         .with_state(ApiState { kv: shared_kv })
 }
 
@@ -92,7 +94,7 @@ async fn start_server(shared_kv: Arc<RwLock<NamespacedKv>>) -> Result<(), BoxErr
     let app = build_router(shared_kv);
     let listener = TcpListener::bind(addr).await?;
 
-    debug!(address = %addr, "Root API ready");
+    debug!(address = %addr, "Root web ready");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -141,12 +143,12 @@ async fn register_node(
     Json(body): Json<NodeRegistrationRequest>,
 ) -> Result<StatusCode, RootApiError> {
     let kv = {
-        let guard = state.kv.read().expect("root api shared kv read lock");
+        let guard = state.kv.read().expect("root web shared kv read lock");
         guard.clone()
     };
 
     validate_auth(&kv, &headers)?;
-    debug!(node_id = %body.node_id, "Root API received node registration request");
+    debug!(node_id = %body.node_id, "Root web received node registration request");
     ensure_public_key_valid(&body.public_key_hex)?;
 
     persist_registration(&kv, &body).map_err(|err| {
@@ -206,7 +208,7 @@ fn registration_storage_key(node_id: &str) -> Vec<u8> {
 pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
     let start = Instant::now();
     let readiness_addr = readiness_address();
-    let request_bytes = b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    let request_bytes = b"GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
     const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(200);
     let mut attempts: u32 = 0;
 
@@ -226,7 +228,7 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
                     Ok(0) => {
                         debug!(
                             attempt = attempts,
-                            "Root API closed connection before responding"
+                            "Root web closed connection before responding"
                         );
                     }
                     Ok(read) => {
@@ -234,7 +236,7 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
                         if response.starts_with("HTTP/1.1 200")
                             || response.starts_with("HTTP/1.0 200")
                         {
-                            debug!(attempt = attempts, "Root API ready");
+                            debug!(attempt = attempts, "Root web ready");
                             return Ok(());
                         }
 
@@ -243,13 +245,13 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
                         ));
                     }
                     Err(err) if is_transient_read_error(&err) => {
-                        debug!(attempt = attempts, error = %err, "Root API read transient error");
+                        debug!(attempt = attempts, error = %err, "Root web read transient error");
                     }
                     Err(err) => return Err(err.into()),
                 }
             }
             Err(err) if is_transient_connect_error(&err) => {
-                debug!(attempt = attempts, error = %err, "Root API not accepting connections yet");
+                debug!(attempt = attempts, error = %err, "Root web not accepting connections yet");
             }
             Err(err) => return Err(err.into()),
         }
@@ -260,7 +262,7 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
 
         debug!(
             attempt = attempts,
-            "Root API not ready yet; sleeping before retry"
+            "Root web not ready yet; sleeping before retry"
         );
         thread::sleep(Duration::from_millis(50));
     }
@@ -381,7 +383,7 @@ mod tests {
         });
 
         let addr = ready_rx.recv().expect("receive listener address");
-        let endpoint = format!("http://{addr}/nodes");
+        let endpoint = format!("http://{addr}/api/nodes");
         context
             .kv
             .put_bytes(ROOT_ENDPOINT_KEY, endpoint.as_bytes())

@@ -5,4 +5,4 @@ edition.workspace = true
 
 [dependencies]
 hightower-context = { path = "../context" }
-hightower-root-api = { path = "../root-api" }
+hightower-root-web = { path = "../root-web" }

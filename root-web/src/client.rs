@@ -7,7 +7,7 @@ use std::fmt;
 use std::time::Duration;
 use tracing::debug;
 
-const DEFAULT_ROOT_ENDPOINT: &str = "http://127.0.0.1:8008/nodes";
+const DEFAULT_ROOT_ENDPOINT: &str = "http://127.0.0.1:8008/api/nodes";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ROOT_ENDPOINT_KEY: &[u8] = b"config/root_api";
 

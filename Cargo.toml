@@ -5,7 +5,7 @@ members = [
     "logging",
     "node-lib",
     "root-lib",
-    "root-api",
+    "root-web",
 ]
 resolver = "2"
 

@@ -1,5 +1,5 @@
 [package]
-name = "hightower-root-api"
+name = "hightower-root-web"
 version.workspace = true
 edition.workspace = true
 

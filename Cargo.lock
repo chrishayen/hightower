@@ -813,7 +813,7 @@ dependencies = [
  "hex",
  "hightower-context",
  "hightower-naming",
- "hightower-root-api",
+ "hightower-root-web",
  "hightower-wireguard",
  "serde",
  "serde_bytes",
@@ -827,11 +827,11 @@ name = "hightower-root"
 version = "0.1.0"
 dependencies = [
  "hightower-context",
- "hightower-root-api",
+ "hightower-root-web",
 ]
 
 [[package]]
-name = "hightower-root-api"
+name = "hightower-root-web"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -857,7 +857,7 @@ dependencies = [
  "hightower-logging",
  "hightower-node",
  "hightower-root",
- "hightower-root-api",
+ "hightower-root-web",
  "serde_json",
  "tempfile",
  "tracing",
