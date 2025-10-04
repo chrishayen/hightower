@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
-use tracing::info;
+use tracing::debug;
 
 const DEFAULT_ROOT_ENDPOINT: &str = "http://127.0.0.1:8008/nodes";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -60,7 +60,7 @@ impl RootRegistrar for HttpRootRegistrar {
         public_key_hex: &str,
     ) -> Result<(), RootRegistrationError> {
         if registration_disabled() {
-            info!(node = node_name, "Skipping root registration (disabled)");
+            debug!(node = node_name, "Skipping root registration (disabled)");
             return Ok(());
         }
 
@@ -80,7 +80,7 @@ impl RootRegistrar for HttpRootRegistrar {
             .map_err(RootRegistrationError::Request)?;
 
         if response.status().is_success() {
-            info!(node = node_name, "Node registration sent to root");
+            debug!(node = node_name, "Node registration sent to root");
             Ok(())
         } else {
             Err(RootRegistrationError::UnexpectedStatus(response.status()))

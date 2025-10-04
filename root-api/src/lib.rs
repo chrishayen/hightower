@@ -25,7 +25,8 @@ use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
+use tracing::dispatcher;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -42,7 +43,7 @@ struct ApiState {
 }
 
 pub fn start(context: &CommonContext) {
-    info!("Root API starting");
+    debug!("Root API starting");
 
     let shared_kv = API_SHARED_KV
         .get_or_init(|| Arc::new(RwLock::new(context.kv.clone())))
@@ -54,21 +55,24 @@ pub fn start(context: &CommonContext) {
     }
 
     API_LAUNCH.get_or_init(|| {
+        let dispatcher = dispatcher::get_default(|current| current.clone());
         thread::Builder::new()
             .name("root-api".into())
             .spawn({
                 let kv_for_thread = shared_kv.clone();
+                let dispatcher = dispatcher.clone();
                 move || {
-                    let runtime = Builder::new_multi_thread()
-                        .worker_threads(1)
-                        .enable_all()
-                        .build()
-                        .expect("root api runtime");
+                    dispatcher::with_default(&dispatcher, || {
+                        let runtime = Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .expect("root api runtime");
 
-                    runtime.block_on(async {
-                        if let Err(err) = start_server(kv_for_thread).await {
-                            error!(?err, "Root API server terminated unexpectedly");
-                        }
+                        runtime.block_on(async {
+                            if let Err(err) = start_server(kv_for_thread).await {
+                                error!(?err, "Root API server terminated unexpectedly");
+                            }
+                        });
                     });
                 }
             })
@@ -88,7 +92,7 @@ async fn start_server(shared_kv: Arc<RwLock<NamespacedKv>>) -> Result<(), BoxErr
     let app = build_router(shared_kv);
     let listener = TcpListener::bind(addr).await?;
 
-    info!(address = %addr, "Root API ready");
+    debug!(address = %addr, "Root API ready");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -149,7 +153,7 @@ async fn register_node(
         RootApiError::Storage(format!("failed to persist node registration: {}", err))
     })?;
 
-    info!(node_id = %body.node_id, "Registered node");
+    debug!(node_id = %body.node_id, "Registered node");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -230,7 +234,7 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
                         if response.starts_with("HTTP/1.1 200")
                             || response.starts_with("HTTP/1.0 200")
                         {
-                            info!(attempt = attempts, "Root API ready");
+                            debug!(attempt = attempts, "Root API ready");
                             return Ok(());
                         }
 
@@ -343,31 +347,35 @@ mod tests {
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
 
         let shared_kv = Arc::new(RwLock::new(context.kv.clone()));
+        let dispatcher = dispatcher::get_default(|current| current.clone());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
         let server_thread = std::thread::spawn({
             let shared_kv = Arc::clone(&shared_kv);
+            let dispatcher = dispatcher.clone();
             move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("runtime");
+                dispatcher::with_default(&dispatcher, || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("runtime");
 
-                runtime.block_on(async move {
-                    let router = build_router(shared_kv);
-                    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-                        .await
-                        .expect("bind api listener");
-                    let addr = listener.local_addr().expect("listener address");
-                    ready_tx.send(addr).expect("announce listener address");
+                    runtime.block_on(async move {
+                        let router = build_router(shared_kv);
+                        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                            .await
+                            .expect("bind api listener");
+                        let addr = listener.local_addr().expect("listener address");
+                        ready_tx.send(addr).expect("announce listener address");
 
-                    axum::serve(listener, router)
-                        .with_graceful_shutdown(async {
-                            let _ = shutdown_rx.await;
-                        })
-                        .await
-                        .expect("serve api");
+                        axum::serve(listener, router)
+                            .with_graceful_shutdown(async {
+                                let _ = shutdown_rx.await;
+                            })
+                            .await
+                            .expect("serve api");
+                    });
                 });
             }
         });

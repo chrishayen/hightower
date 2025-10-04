@@ -7,7 +7,7 @@ pub use certificates::NodeCertificate;
 use hightower_context::{CommonContext, NODE_CERTIFICATE_KEY, NODE_NAME_KEY};
 use hightower_root_api::{default_registrar, RootRegistrar};
 use serde_json::to_vec;
-use tracing::{error, info};
+use tracing::{debug, error};
 
 pub fn run(context: &CommonContext) {
     let registrar = default_registrar();
@@ -20,7 +20,7 @@ where
 {
     let node_name = node_name::generate();
     persist_node_name(context, &node_name);
-    info!("Node running as {}", node_name);
+    debug!("Node running as {}", node_name);
 
     let certificate = node_impl::startup();
     persist_certificate(context, &certificate);

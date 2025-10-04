@@ -11,7 +11,7 @@ use hightower_root::{self, WaitForRootError};
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 pub fn run(cli: Cli) -> Result<(), AppError> {
     let mode = mode::resolve(&cli);
@@ -22,9 +22,9 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
 
     run_mode(mode, &context)?;
 
-    info!("Waiting for Ctrl-C to exit");
+    debug!("Waiting for Ctrl-C to exit");
     shutdown::wait_for_ctrl_c().map_err(AppError::Shutdown)?;
-    info!("Shutdown signal received");
+    debug!("Shutdown signal received");
     Ok(())
 }
 
