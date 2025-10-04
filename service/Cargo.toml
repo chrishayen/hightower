@@ -13,6 +13,6 @@ clap = { workspace = true }
 ctrlc = { workspace = true }
 
 [dev-dependencies]
-hightower-root-client = { path = "../root-client" }
+hightower-root-api = { path = "../root-api" }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

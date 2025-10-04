@@ -5,7 +5,7 @@ mod node_name;
 pub use certificates::NodeCertificate;
 
 use hightower_context::{CommonContext, NODE_CERTIFICATE_KEY, NODE_NAME_KEY};
-use hightower_root_client::{RootRegistrar, default_registrar};
+use hightower_root_api::{default_registrar, RootRegistrar};
 use serde_json::to_vec;
 use tracing::{error, info};
 
@@ -60,7 +60,7 @@ fn persist_certificate(context: &CommonContext, certificate: &NodeCertificate) {
 mod tests {
     use super::*;
     use hightower_context::{CommonContext, initialize_kv};
-    use hightower_root_client::RootRegistrationError;
+    use hightower_root_api::RootRegistrationError;
     use std::sync::Mutex;
     use tempfile::TempDir;
 

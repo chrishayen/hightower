@@ -1,6 +1,6 @@
 use hightower_context::{CommonContext, HT_AUTH_KEY, NamespacedKv};
-use reqwest::StatusCode as HttpStatusCode;
 use reqwest::blocking::Client;
+use reqwest::StatusCode as HttpStatusCode;
 use serde::Serialize;
 use std::error::Error;
 use std::fmt;
@@ -157,7 +157,7 @@ impl Error for RootRegistrationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hightower_context::{CommonContext, initialize_kv};
+    use hightower_context::{initialize_kv, CommonContext};
     use std::sync::Mutex;
     use tempfile::TempDir;
 

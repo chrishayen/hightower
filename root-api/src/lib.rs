@@ -1,3 +1,13 @@
+pub mod client;
+
+pub use client::{
+    default_registrar,
+    HttpRootRegistrar,
+    RootRegistrar,
+    RootRegistrationError,
+    ROOT_ENDPOINT_KEY,
+};
+
 use axum::{
     Router,
     body::Body,

@@ -813,7 +813,7 @@ dependencies = [
  "hex",
  "hightower-context",
  "hightower-naming",
- "hightower-root-client",
+ "hightower-root-api",
  "hightower-wireguard",
  "serde",
  "serde_bytes",
@@ -838,24 +838,12 @@ dependencies = [
  "hex",
  "hightower-context",
  "hightower-kv",
+ "reqwest",
  "serde",
  "serde_json",
  "subtle",
  "tempfile",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hightower-root-client"
-version = "0.1.0"
-dependencies = [
- "hex",
- "hightower-context",
- "hightower-kv",
- "reqwest",
- "serde",
- "tempfile",
  "tracing",
 ]
 
@@ -869,7 +857,7 @@ dependencies = [
  "hightower-logging",
  "hightower-node",
  "hightower-root",
- "hightower-root-client",
+ "hightower-root-api",
  "serde_json",
  "tempfile",
  "tracing",

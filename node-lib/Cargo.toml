@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hightower-context = { path = "../context" }
-hightower-root-client = { path = "../root-client" }
+hightower-root-api = { path = "../root-api" }
 hightower-naming = { workspace = true }
 hightower-wireguard = { workspace = true }
 hex = { workspace = true }

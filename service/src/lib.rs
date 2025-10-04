@@ -108,7 +108,7 @@ mod tests {
     use crate::mode::Mode;
     use hightower_context::{CommonContext, NODE_CERTIFICATE_KEY, NODE_NAME_KEY, initialize_kv};
     use hightower_node::NodeCertificate;
-    use hightower_root_client::ROOT_ENDPOINT_KEY;
+    use hightower_root_api::ROOT_ENDPOINT_KEY;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;

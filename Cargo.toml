@@ -6,7 +6,6 @@ members = [
     "node-lib",
     "root-lib",
     "root-api",
-    "root-client",
 ]
 resolver = "2"
 
