@@ -42,6 +42,9 @@ should hook in.
   remain small orchestrators that combine crypto, indexing, and engine writes.
 - Metadata helpers (`create_user_with_metadata`, decrypt functions) ensure all
   sensitive blobs are encrypted via the injected `EnvelopeEncryptor`.
+- `SingleNodeEngine::into_argon2_hasher_aes_gcm_auth_service` returns an
+  `Arc<SingleNodeEngine>` plus an `AuthService` wired to the default crypto
+  primitives, preventing ownership tangles when higher layers need both handles.
 - Use the `run_compaction_now` engine helper to manage persistent auth data in
   tests that need deterministic storage layout.
 - `revoke_api_key` tombstones API keys so subsequent authentication attempts

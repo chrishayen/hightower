@@ -51,17 +51,14 @@ submissions will run inline on the caller.
 ### Authentication helper
 
 ```rust
-use hightower_kv::crypto::{AesGcmEncryptor, Argon2SecretHasher};
-use hightower_kv::{AuthService, SingleNodeEngine, StoreConfig};
+use hightower_kv::{SingleNodeEngine, StoreConfig};
 
 fn bootstrap_auth() -> hightower_kv::Result<()> {
     let mut config = StoreConfig::default();
     config.data_dir = "./auth-data".into();
 
-    let engine = SingleNodeEngine::with_config(config)?;
-    let hasher = Argon2SecretHasher::default();
-    let encryptor = AesGcmEncryptor::new([0u8; 32]);
-    let auth = AuthService::new(engine, hasher, encryptor);
+    let (engine, auth) = SingleNodeEngine::with_config(config)?
+        .into_argon2_hasher_aes_gcm_auth_service([0u8; 32]);
 
     let user = auth.create_user_with_metadata(
         "captain",
@@ -90,6 +87,9 @@ fn bootstrap_auth() -> hightower_kv::Result<()> {
 
     auth.revoke_api_key(&record.key_id)?;
     assert!(auth.authenticate_api_key(&token)?.is_none());
+
+    // The shared engine handle remains usable alongside the auth service.
+    engine.flush()?;
     Ok(())
 }
 ```
@@ -99,6 +99,11 @@ Additional runnable samples live under `examples/`:
 - `cargo run --example basic_kv` demonstrates simple put/get/delete calls.
 - `cargo run --example auth_flow` wires in `AuthService`, hashes passwords, and
   issues API keys.
+
+`into_argon2_hasher_aes_gcm_auth_service` splits the engine into a shared
+`Arc<SingleNodeEngine>` and an `AuthService` preloaded with the default
+Argon2/AES-GCM crypto helpers, so applications can keep using the engine while
+serving auth flows without juggling ownership.
 
 ## Core Decisions
 ### Storage Engine

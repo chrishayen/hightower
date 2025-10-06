@@ -5,9 +5,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
+use crate::auth_service::AuthService;
 use crate::command::Command;
 use crate::compactor::{CompactionConfig, Compactor};
 use crate::config::StoreConfig;
+use crate::crypto::{AesGcmEncryptor, Argon2SecretHasher};
 use crate::error::{Error, Result};
 use crate::id_generator::IdGenerator;
 use crate::state::{ApplyOutcome, ConcurrentKvState, KvState};
@@ -305,6 +307,23 @@ impl SingleNodeEngine {
         self.shared.run_compaction_now()
     }
 
+    /// Wraps the engine in an `Arc` and constructs an `AuthService` configured with Argon2 hashing and AES-GCM encryption.
+    pub fn into_argon2_hasher_aes_gcm_auth_service(
+        self,
+        master_key: [u8; 32],
+    ) -> (
+        Arc<SingleNodeEngine>,
+        AuthService<Arc<SingleNodeEngine>, Argon2SecretHasher, AesGcmEncryptor>,
+    ) {
+        let engine = Arc::new(self);
+        let auth = AuthService::new(
+            Arc::clone(&engine),
+            Argon2SecretHasher::default(),
+            AesGcmEncryptor::new(master_key),
+        );
+        (engine, auth)
+    }
+
     fn dispatch_command(&self, command: Command) -> Result<ApplyOutcome> {
         if let Some(dispatcher) = &self.dispatcher {
             let (tx, rx) = bounded(1);
@@ -438,6 +457,26 @@ impl KvEngine for SingleNodeEngine {
                 Ok(None)
             }
         }
+    }
+}
+
+impl<E> KvEngine for Arc<E>
+where
+    E: KvEngine,
+{
+    fn submit(&self, command: Command) -> Result<ApplyOutcome> {
+        (**self).submit(command)
+    }
+
+    fn submit_batch<I>(&self, commands: I) -> Result<Vec<ApplyOutcome>>
+    where
+        I: IntoIterator<Item = Command>,
+    {
+        (**self).submit_batch(commands)
+    }
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        (**self).get(key)
     }
 }
 
@@ -703,6 +742,25 @@ mod tests {
 
         let reopened = SingleNodeEngine::with_config(cfg).unwrap();
         assert!(reopened.get(b"key0").unwrap().is_some());
+    }
+
+    #[test]
+    fn into_argon2_hasher_aes_gcm_auth_service_returns_handles() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+
+        let (engine, auth) = engine.into_argon2_hasher_aes_gcm_auth_service([7u8; 32]);
+
+        let user = auth.create_user("bundle", "secret").unwrap();
+        assert!(auth.verify_password("bundle", "secret").unwrap());
+
+        let (record, token) = auth.create_api_key(&user.user_id, None).unwrap();
+        assert!(token.starts_with(&record.key_id));
+        assert!(auth.authenticate_api_key(&token).unwrap().is_some());
+
+        engine.put(b"key".to_vec(), b"value".to_vec()).unwrap();
+        assert_eq!(engine.get(b"key").unwrap(), Some(b"value".to_vec()));
     }
 
     #[test]
