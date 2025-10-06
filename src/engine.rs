@@ -32,6 +32,8 @@ pub trait KvEngine: Send + Sync {
     }
     /// Retrieves the value for a key if it exists.
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
+    /// Retrieves all key-value pairs with the given prefix.
+    fn get_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
 }
 
 /// Trait for engines that can produce state snapshots.
@@ -307,6 +309,40 @@ impl SingleNodeEngine {
         self.shared.run_compaction_now()
     }
 
+    /// Retrieves all key-value pairs with the given prefix.
+    pub fn get_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let entries = self.shared.storage.get_prefix(prefix);
+        let mut results = Vec::with_capacity(entries.len());
+
+        for (key, entry) in entries {
+            if entry.is_tombstone {
+                continue;
+            }
+
+            // Try to get from state first
+            if let Some(value) = self.shared.state.get(&key) {
+                results.push((key, value));
+                continue;
+            }
+
+            // Fetch from storage if not in state
+            if let Some(command) = self.shared.storage.fetch_command(&entry)? {
+                if let Command::Set { key, value, version, timestamp } = command {
+                    let mut guard = self.shared.state.lock_entry(&key);
+                    guard.apply(&Command::Set {
+                        key: key.clone(),
+                        value: value.clone(),
+                        version,
+                        timestamp,
+                    });
+                    results.push((key, value));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Wraps the engine in an `Arc` and constructs an `AuthService` configured with Argon2 hashing and AES-GCM encryption.
     pub fn into_argon2_hasher_aes_gcm_auth_service(
         self,
@@ -458,6 +494,10 @@ impl KvEngine for SingleNodeEngine {
             }
         }
     }
+
+    fn get_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.get_prefix(prefix)
+    }
 }
 
 impl<E> KvEngine for Arc<E>
@@ -477,6 +517,10 @@ where
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         (**self).get(key)
+    }
+
+    fn get_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        (**self).get_prefix(prefix)
     }
 }
 
@@ -794,5 +838,80 @@ mod tests {
                 assert_eq!(engine.get(&key).unwrap(), Some(expected));
             }
         }
+    }
+
+    #[test]
+    fn get_prefix_returns_matching_keys() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+
+        engine.put(b"app:user:1".to_vec(), b"alice".to_vec()).unwrap();
+        engine.put(b"app:user:2".to_vec(), b"bob".to_vec()).unwrap();
+        engine.put(b"app:session:1".to_vec(), b"s1".to_vec()).unwrap();
+        engine.put(b"other:key".to_vec(), b"value".to_vec()).unwrap();
+
+        let results = engine.get_prefix(b"app:user:").unwrap();
+        assert_eq!(results.len(), 2);
+
+        let mut keys: Vec<Vec<u8>> = results.iter().map(|(k, _)| k.clone()).collect();
+        keys.sort();
+        assert_eq!(keys[0], b"app:user:1");
+        assert_eq!(keys[1], b"app:user:2");
+
+        let values: Vec<Vec<u8>> = results.iter().map(|(_, v)| v.clone()).collect();
+        assert!(values.contains(&b"alice".to_vec()));
+        assert!(values.contains(&b"bob".to_vec()));
+    }
+
+    #[test]
+    fn get_prefix_excludes_deleted_keys() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+
+        engine.put(b"prefix:key1".to_vec(), b"value1".to_vec()).unwrap();
+        engine.put(b"prefix:key2".to_vec(), b"value2".to_vec()).unwrap();
+        engine.delete(b"prefix:key1".to_vec()).unwrap();
+
+        let results = engine.get_prefix(b"prefix:").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, b"prefix:key2");
+        assert_eq!(results[0].1, b"value2");
+    }
+
+    #[test]
+    fn get_prefix_with_empty_prefix_returns_all() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+        let engine = SingleNodeEngine::with_config(cfg).unwrap();
+
+        engine.put(b"a".to_vec(), b"1".to_vec()).unwrap();
+        engine.put(b"b".to_vec(), b"2".to_vec()).unwrap();
+        engine.put(b"c".to_vec(), b"3".to_vec()).unwrap();
+
+        let results = engine.get_prefix(b"").unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn get_prefix_persists_across_reopen() {
+        let temp = tempdir().unwrap();
+        let cfg = temp_config(temp.path());
+
+        {
+            let engine = SingleNodeEngine::with_config(cfg.clone()).unwrap();
+            engine.put(b"persist:1".to_vec(), b"v1".to_vec()).unwrap();
+            engine.put(b"persist:2".to_vec(), b"v2".to_vec()).unwrap();
+            engine.put(b"other".to_vec(), b"v3".to_vec()).unwrap();
+        }
+
+        let reopened = SingleNodeEngine::with_config(cfg).unwrap();
+        let results = reopened.get_prefix(b"persist:").unwrap();
+        assert_eq!(results.len(), 2);
+
+        let keys: Vec<Vec<u8>> = results.iter().map(|(k, _)| k.clone()).collect();
+        assert!(keys.contains(&b"persist:1".to_vec()));
+        assert!(keys.contains(&b"persist:2".to_vec()));
     }
 }

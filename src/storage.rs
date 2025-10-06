@@ -104,6 +104,11 @@ impl Storage {
         }
     }
 
+    /// Gets all key-entry pairs with the given prefix
+    pub fn get_prefix(&self, prefix: &[u8]) -> Vec<(Vec<u8>, IndexEntry)> {
+        self.index.read().get_prefix(prefix)
+    }
+
     /// Reads the command corresponding to an index entry from its segment.
     pub fn fetch_command(&self, entry: &IndexEntry) -> Result<Option<Command>> {
         let segment = self.segment_for(entry.segment_id)?;

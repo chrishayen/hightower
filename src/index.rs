@@ -1,6 +1,8 @@
 use hashbrown::HashMap;
 use std::sync::Arc;
 
+use crate::prefix_index::PrefixIndex;
+
 /// Entry in the index pointing to a command in a log segment
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexEntry {
@@ -20,6 +22,7 @@ pub struct IndexEntry {
 #[derive(Clone, Default, Debug)]
 pub struct Index {
     inner: Arc<HashMap<Vec<u8>, IndexEntry>>,
+    prefix_index: PrefixIndex,
 }
 
 impl Index {
@@ -27,6 +30,7 @@ impl Index {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(HashMap::new()),
+            prefix_index: PrefixIndex::new(),
         }
     }
 
@@ -52,11 +56,13 @@ impl Index {
 
     /// Inserts or updates an entry in the index, returning the previous entry if any
     pub fn upsert(&mut self, key: Vec<u8>, entry: IndexEntry) -> Option<IndexEntry> {
+        self.prefix_index.insert(key.clone(), entry.clone());
         Arc::make_mut(&mut self.inner).insert(key, entry)
     }
 
     /// Removes an entry from the index and returns it
     pub fn remove(&mut self, key: &[u8]) -> Option<IndexEntry> {
+        self.prefix_index.remove(key);
         Arc::make_mut(&mut self.inner).remove(key)
     }
 
@@ -64,13 +70,24 @@ impl Index {
     pub fn snapshot(&self) -> IndexSnapshot {
         IndexSnapshot {
             inner: Arc::clone(&self.inner),
+            prefix_index: self.prefix_index.clone(),
         }
+    }
+
+    /// Gets all key-entry pairs with the given prefix
+    pub fn get_prefix(&self, prefix: &[u8]) -> Vec<(Vec<u8>, IndexEntry)> {
+        self.prefix_index.get_prefix(prefix)
     }
 
     /// Rebuilds an index from a builder
     pub fn rebuild(builder: IndexBuilder) -> Self {
+        let mut prefix_index = PrefixIndex::new();
+        for (key, entry) in &builder.entries {
+            prefix_index.insert(key.clone(), entry.clone());
+        }
         Self {
             inner: Arc::new(builder.entries),
+            prefix_index,
         }
     }
 }
@@ -78,6 +95,7 @@ impl Index {
 /// Immutable snapshot of an index for consistent reads
 pub struct IndexSnapshot {
     inner: Arc<HashMap<Vec<u8>, IndexEntry>>,
+    prefix_index: PrefixIndex,
 }
 
 impl IndexSnapshot {
@@ -94,6 +112,11 @@ impl IndexSnapshot {
     /// Returns the number of entries in the snapshot
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Gets all key-entry pairs with the given prefix
+    pub fn get_prefix(&self, prefix: &[u8]) -> Vec<(Vec<u8>, IndexEntry)> {
+        self.prefix_index.get_prefix(prefix)
     }
 }
 
@@ -116,8 +139,13 @@ impl IndexBuilder {
 
     /// Builds the final index from the accumulated entries
     pub fn build(self) -> Index {
+        let mut prefix_index = PrefixIndex::new();
+        for (key, entry) in &self.entries {
+            prefix_index.insert(key.clone(), entry.clone());
+        }
         Index {
             inner: Arc::new(self.entries),
+            prefix_index,
         }
     }
 }
