@@ -219,11 +219,145 @@ impl EngineHarness {
     }
 }
 
+fn bench_prefix_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("prefix_queries");
+
+    // Benchmark with different result set sizes
+    for result_count in [10, 100, 1000] {
+        group.bench_function(BenchmarkId::new("get_prefix", result_count), |b| {
+            b.iter_batched(
+                || prepare_prefix_dataset(10_000, result_count),
+                |(harness, prefix)| {
+                    let _ = harness.engine.get_prefix(&prefix).unwrap();
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    // Benchmark with different prefix lengths
+    for prefix_len in [2, 8, 16] {
+        group.bench_function(BenchmarkId::new("prefix_length", prefix_len), |b| {
+            b.iter_batched(
+                || prepare_prefix_length_dataset(10_000, prefix_len),
+                |(harness, prefix)| {
+                    let _ = harness.engine.get_prefix(&prefix).unwrap();
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_prefix_vs_scan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("prefix_vs_scan");
+
+    group.bench_function("prefix_query_1000_of_10k", |b| {
+        b.iter_batched(
+            || prepare_prefix_dataset(10_000, 1000),
+            |(harness, prefix)| {
+                let _ = harness.engine.get_prefix(&prefix).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("manual_scan_1000_of_10k", |b| {
+        b.iter_batched(
+            || prepare_prefix_dataset(10_000, 1000),
+            |(harness, prefix)| {
+                let snapshot = harness.engine.read_with(|state| {
+                    state.iter()
+                        .filter(|(k, _)| k.starts_with(&prefix))
+                        .map(|(k, (v, _version))| (k.clone(), v.clone()))
+                        .collect::<Vec<_>>()
+                });
+                let _ = snapshot;
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
+fn bench_write_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("write_overhead");
+
+    group.bench_function("put_1k_with_prefix_index", |b| {
+        b.iter_batched(
+            setup_engine,
+            |harness| {
+                let mut rng = StdRng::seed_from_u64(42);
+                for _ in 0..1024 {
+                    harness
+                        .engine
+                        .put(random_key(&mut rng, 16), random_value(&mut rng, 256))
+                        .unwrap();
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
+fn prepare_prefix_dataset(total_keys: usize, matching_keys: usize) -> (EngineHarness, Vec<u8>) {
+    let harness = setup_engine();
+    let mut rng = StdRng::seed_from_u64(1234);
+
+    // Insert keys with matching prefix
+    let prefix = b"app:user:".to_vec();
+    for i in 0..matching_keys {
+        let key = format!("app:user:{:08}", i).into_bytes();
+        let value = random_value(&mut rng, 128);
+        harness.engine.put(key, value).unwrap();
+    }
+
+    // Insert keys without matching prefix
+    for _ in 0..(total_keys - matching_keys) {
+        let key = random_key(&mut rng, 24);
+        let value = random_value(&mut rng, 128);
+        harness.engine.put(key, value).unwrap();
+    }
+
+    (harness, prefix)
+}
+
+fn prepare_prefix_length_dataset(total_keys: usize, prefix_len: usize) -> (EngineHarness, Vec<u8>) {
+    let harness = setup_engine();
+    let mut rng = StdRng::seed_from_u64(5678);
+
+    // Create a fixed prefix of the desired length
+    let prefix = vec![b'p'; prefix_len];
+
+    // Insert 100 keys with matching prefix
+    for i in 0..100 {
+        let mut key = prefix.clone();
+        key.extend_from_slice(format!(":{:08}", i).as_bytes());
+        let value = random_value(&mut rng, 128);
+        harness.engine.put(key, value).unwrap();
+    }
+
+    // Insert random keys without matching prefix
+    for _ in 0..(total_keys - 100) {
+        let key = random_key(&mut rng, 24);
+        let value = random_value(&mut rng, 128);
+        harness.engine.put(key, value).unwrap();
+    }
+
+    (harness, prefix)
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default()
         .sample_size(40)
         .measurement_time(std::time::Duration::from_secs(20));
-    targets = bench_engine_writes, bench_engine_reads, bench_compaction, bench_engine_writes_parallel
+    targets = bench_engine_writes, bench_engine_reads, bench_compaction, bench_engine_writes_parallel,
+              bench_prefix_queries, bench_prefix_vs_scan, bench_write_overhead
 );
 criterion_main!(benches);
