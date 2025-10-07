@@ -34,7 +34,6 @@ This is **not** a complete VPN implementation. The following components are not 
 - **Cookie Mechanism**: No DoS protection via cookies (Message Type 3)
 - **Transport Data Messages**: No actual data encryption/decryption (Message Type 4)
 - **Key Rotation**: No automatic session key rekeying
-- **Packet Serialization**: Handshake messages are not serialized to wire format
 - **Production Features**: No timers, replay protection, or keepalives
 
 This library is suitable for:
@@ -49,7 +48,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-wireguard = "0.1.2"
+hightower-wireguard = "0.1.3"
 ```
 
 ## Usage
@@ -115,6 +114,35 @@ bob.add_peer(PeerInfo {
 
 // Handshake will now use PSK for additional security
 ```
+
+## Message Serialization
+
+Messages can be serialized to and from wire format for network transmission:
+
+```rust
+use hightower_wireguard::messages::HandshakeInitiation;
+
+// After creating a handshake initiation message
+let initiation = alice.initiate_handshake(&bob_public)?;
+
+// Serialize to wire format (148 bytes)
+let bytes = initiation.to_bytes()?;
+
+// Send over network...
+// let socket.send_to(&bytes, peer_addr)?;
+
+// On the receiving side, deserialize from bytes
+let received = HandshakeInitiation::from_bytes(&bytes)?;
+let response = bob.process_initiation(&received)?;
+
+// Serialize the response (92 bytes)
+let response_bytes = response.to_bytes()?;
+```
+
+The following message types support serialization:
+- `HandshakeInitiation`: 148 bytes
+- `HandshakeResponse`: 92 bytes
+- `TransportData`: 16 bytes + variable packet length
 
 ## Testing
 
