@@ -1,6 +1,6 @@
 [package]
 name = "hightower-wireguard"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["Chris Hayen"]
 description = "A WireGuard Noise_IK handshake implementation"
@@ -40,3 +40,4 @@ transport = ["tokio", "tracing", "hex"]
 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["full"] }
+tracing-subscriber = "0.3"

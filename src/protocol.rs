@@ -6,6 +6,16 @@ use crate::responder::ResponderState;
 use crate::{Result, WireGuardError};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::Duration;
+
+/// Time after which to initiate a new handshake (RFC: REKEY-AFTER-TIME)
+pub const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
+
+/// Time after which to reject packets and require new handshake (RFC: REJECT-AFTER-TIME)
+pub const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
+
+/// Time to wait before sending keep-alive if no data has been sent
+pub const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Configuration and metadata for a WireGuard peer
 #[derive(Debug, Clone)]
@@ -29,10 +39,14 @@ pub struct ActiveSession {
     pub keys: SessionKeys,
     /// Public key of the peer this session is with
     pub peer_public_key: PublicKey25519,
-    /// Timestamp when this session was created
+    /// Timestamp when this session was created (handshake completed)
     pub created_at: std::time::Instant,
     /// Timestamp of last activity on this session
     pub last_used: std::time::Instant,
+    /// Timestamp of last data sent on this session
+    pub last_send: std::time::Instant,
+    /// Current endpoint address for this peer (updated on packet receipt)
+    pub endpoint: Option<SocketAddr>,
     /// Replay protection window for received packets
     pub replay_window: ReplayWindow,
 }
@@ -144,16 +158,30 @@ impl WireGuardProtocol {
 
         // Derive keys and create active session
         let keys = responder.derive_keys()?;
+        let now = std::time::Instant::now();
         let session = ActiveSession {
             keys,
             peer_public_key,
-            created_at: std::time::Instant::now(),
-            last_used: std::time::Instant::now(),
+            created_at: now,
+            last_used: now,
+            last_send: now,
+            endpoint: None,
             replay_window: ReplayWindow::new(),
         };
 
         // Store the active session
         self.active_sessions.insert(sender_id, session);
+
+        #[cfg(feature = "transport")]
+        {
+            use tracing::info;
+            let peer_key_hex = hex::encode(peer_public_key);
+            info!(
+                session_id = sender_id,
+                peer_public_key = &peer_key_hex[..8],
+                "SESSION: New session created (responder)"
+            );
+        }
 
         Ok(response)
     }
@@ -183,16 +211,30 @@ impl WireGuardProtocol {
             .ok_or_else(|| WireGuardError::ProtocolError("Cannot identify peer".to_string()))?;
 
         // Create active session
+        let now = std::time::Instant::now();
         let session = ActiveSession {
             keys,
             peer_public_key,
-            created_at: std::time::Instant::now(),
-            last_used: std::time::Instant::now(),
+            created_at: now,
+            last_used: now,
+            last_send: now,
+            endpoint: None,
             replay_window: ReplayWindow::new(),
         };
 
         // Store the active session using the sender ID from the response
         self.active_sessions.insert(msg.sender, session);
+
+        #[cfg(feature = "transport")]
+        {
+            use tracing::info;
+            let peer_key_hex = hex::encode(peer_public_key);
+            info!(
+                session_id = msg.sender,
+                peer_public_key = &peer_key_hex[..8],
+                "SESSION: New session created (initiator)"
+            );
+        }
 
         Ok(peer_public_key)
     }
@@ -257,5 +299,76 @@ impl WireGuardProtocol {
         if self.pending_responses.len() > 100 {
             self.pending_responses.clear();
         }
+    }
+
+    /// Update endpoint address for a session when receiving a packet
+    ///
+    /// Supports endpoint roaming (mobile devices changing networks)
+    pub fn update_endpoint(&mut self, sender_id: u32, new_endpoint: SocketAddr) {
+        if let Some(session) = self.active_sessions.get_mut(&sender_id) {
+            let old_endpoint = session.endpoint;
+            if old_endpoint != Some(new_endpoint) {
+                #[cfg(feature = "transport")]
+                {
+                    use tracing::info;
+                    let peer_key_hex = hex::encode(session.peer_public_key);
+                    info!(
+                        session_id = sender_id,
+                        peer_public_key = &peer_key_hex[..8],
+                        old_endpoint = ?old_endpoint,
+                        new_endpoint = %new_endpoint,
+                        "ROAMING: Endpoint updated for session"
+                    );
+                }
+            }
+            session.endpoint = Some(new_endpoint);
+        }
+    }
+
+    /// Update last send time for a session
+    pub fn update_last_send(&mut self, sender_id: u32) {
+        if let Some(session) = self.active_sessions.get_mut(&sender_id) {
+            session.last_send = std::time::Instant::now();
+        }
+    }
+
+    /// Check if a session needs rekeying based on age
+    ///
+    /// Returns true if the session is older than REKEY_AFTER_TIME
+    pub fn needs_rekey(&self, sender_id: u32) -> bool {
+        if let Some(session) = self.active_sessions.get(&sender_id) {
+            let age = std::time::Instant::now().duration_since(session.created_at);
+            age >= REKEY_AFTER_TIME
+        } else {
+            false
+        }
+    }
+
+    /// Check if a session should be rejected (too old)
+    ///
+    /// Returns true if the session is older than REJECT_AFTER_TIME
+    pub fn should_reject(&self, sender_id: u32) -> bool {
+        if let Some(session) = self.active_sessions.get(&sender_id) {
+            let age = std::time::Instant::now().duration_since(session.created_at);
+            age >= REJECT_AFTER_TIME
+        } else {
+            true
+        }
+    }
+
+    /// Find session by peer public key
+    pub fn find_session_by_peer(&self, peer_public_key: &PublicKey25519) -> Option<(u32, &ActiveSession)> {
+        self.active_sessions
+            .iter()
+            .find(|(_, session)| session.peer_public_key == *peer_public_key)
+            .map(|(id, session)| (*id, session))
+    }
+
+    /// Find mutable session by peer public key
+    pub fn find_session_by_peer_mut(&mut self, peer_public_key: &PublicKey25519) -> Option<(u32, &mut ActiveSession)> {
+        self.active_sessions
+            .iter_mut()
+            .find(|(_, session)| session.peer_public_key == *peer_public_key)
+            .map(|(id, session)| (*id, session))
     }
 }

@@ -54,7 +54,7 @@ impl Conn {
         let server = self.server.as_ref().ok_or(Error::ConnectionClosed)?;
 
         // Get the active session from the protocol
-        let protocol = server.protocol.lock().await;
+        let mut protocol = server.protocol.lock().await;
 
         // Find session by matching peer public key
         let active_sessions = protocol.active_sessions();
@@ -78,6 +78,9 @@ impl Conn {
         let current_counter = *counter;
         *counter += 1;
         drop(counter);
+
+        // Update last_send time in session
+        protocol.update_last_send(session_id);
         drop(protocol);
 
         // Create TransportData message
@@ -122,6 +125,80 @@ impl Conn {
                 Err(Error::ConnectionClosed)
             }
         }
+    }
+
+    /// Send a keep-alive packet (empty transport data)
+    pub async fn send_keepalive(&self) -> Result<(), Error> {
+        if *self.closed.lock().await {
+            return Err(Error::ConnectionClosed);
+        }
+
+        let server = self.server.as_ref().ok_or(Error::ConnectionClosed)?;
+
+        // Get the active session from the protocol
+        let mut protocol = server.protocol.lock().await;
+
+        // Find session by matching peer public key
+        let active_sessions = protocol.active_sessions();
+        let session_entry = active_sessions
+            .iter()
+            .find(|(_, session)| session.peer_public_key == self.peer_public_key)
+            .ok_or_else(|| Error::ProtocolError("No active session for this peer".to_string()))?;
+
+        let (session_id, session) = session_entry;
+        let session_id = *session_id;
+
+        // Get endpoint from session (supports roaming)
+        let endpoint = session.endpoint.unwrap_or(self.peer_addr);
+
+        let peer_key_hex = hex::encode(self.peer_public_key);
+        debug!(
+            conn_id = self.id.0,
+            session_id = session_id,
+            peer_public_key = &peer_key_hex[..8],
+            endpoint = %endpoint,
+            "Sending keep-alive packet"
+        );
+
+        // Encrypt empty payload using AEAD
+        let mut counter = self.send_counter.lock().await;
+        let encrypted = crate::crypto::aead_encrypt(
+            &session.keys.send_key,
+            *counter,
+            &[],  // Empty payload for keep-alive
+            &[],
+        ).map_err(|_| Error::EncryptionFailed)?;
+
+        let current_counter = *counter;
+        *counter += 1;
+        drop(counter);
+
+        // Update last_send time in session
+        protocol.update_last_send(session_id);
+        drop(protocol);
+
+        // Create TransportData message
+        use crate::messages::TransportData;
+        let mut transport_msg = TransportData::new();
+        transport_msg.receiver = session_id;
+        transport_msg.counter = current_counter;
+        transport_msg.packet = encrypted;
+
+        // Serialize and send
+        let msg_bytes = transport_msg.to_bytes()
+            .map_err(|e| Error::ProtocolError(format!("Failed to serialize transport data: {}", e)))?;
+
+        server.udp_socket.send_to(&msg_bytes, endpoint).await?;
+
+        debug!(
+            conn_id = self.id.0,
+            session_id = session_id,
+            counter = current_counter,
+            bytes = msg_bytes.len(),
+            "Keep-alive packet sent successfully"
+        );
+
+        Ok(())
     }
 
     /// Close the connection

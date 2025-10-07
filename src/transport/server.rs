@@ -420,11 +420,12 @@ impl Server {
                             // Process handshake response and route to the correct pending dial
                             match HandshakeResponse::from_bytes(&buf[..len]) {
                                 Ok(response) => {
-                                    debug!(
+                                    use tracing::info;
+                                    info!(
                                         from = %from,
                                         sender = response.sender,
                                         receiver = response.receiver,
-                                        "Received handshake response"
+                                        "Received handshake response (could be initial or rekey)"
                                     );
 
                                     // Check if this is for a pending handshake
@@ -477,7 +478,10 @@ impl Server {
                                         );
 
                                         // Decrypt the packet
-                                        let protocol = self.protocol.lock().await;
+                                        let mut protocol = self.protocol.lock().await;
+
+                                        // Update endpoint for roaming support
+                                        protocol.update_endpoint(transport_data.receiver, from);
 
                                         // Get the session
                                         if let Some(session) = protocol.get_session(transport_data.receiver) {
@@ -488,15 +492,30 @@ impl Server {
                                                 &[],
                                             ) {
                                                 Ok(plaintext) => {
-                                                    debug!(
-                                                        from = %from,
-                                                        plaintext_len = plaintext.len(),
-                                                        "Decrypted transport data"
-                                                    );
+                                                    // Check if this is a keep-alive (empty payload)
+                                                    if plaintext.is_empty() {
+                                                        let peer_key_hex = hex::encode(session.peer_public_key);
+                                                        debug!(
+                                                            from = %from,
+                                                            session_id = transport_data.receiver,
+                                                            peer_public_key = &peer_key_hex[..8],
+                                                            counter = transport_data.counter,
+                                                            "Received keep-alive packet"
+                                                        );
+                                                    } else {
+                                                        debug!(
+                                                            from = %from,
+                                                            plaintext_len = plaintext.len(),
+                                                            "Decrypted transport data"
+                                                        );
+                                                    }
 
-                                                    // Find connection by peer address and route data
+                                                    // Find connection by peer public key (supports roaming)
+                                                    let peer_public_key = session.peer_public_key;
+                                                    drop(protocol);
+
                                                     let connections = self.connections.read().await;
-                                                    if let Some(conn) = connections.values().find(|c| c.peer_addr == from) {
+                                                    if let Some(conn) = connections.values().find(|c| c.peer_public_key == peer_public_key) {
                                                         if let Err(e) = conn.recv_tx.send(plaintext) {
                                                             debug!(
                                                                 from = %from,
@@ -562,6 +581,157 @@ impl Server {
         Ok(())
     }
 
+    /// Background task for keep-alive and rekey management
+    ///
+    /// This should be spawned as a background task alongside run()
+    pub async fn run_maintenance(&self) -> Result<(), Error> {
+        use crate::protocol::{KEEPALIVE_TIMEOUT, REKEY_AFTER_TIME};
+        use tracing::info;
+
+        info!(
+            rekey_after = ?REKEY_AFTER_TIME,
+            keepalive_default = ?KEEPALIVE_TIMEOUT,
+            "MAINTENANCE: Starting background task for keep-alive and rekey"
+        );
+
+        while self.running.load(Ordering::SeqCst) {
+            // Sleep for 1 second between checks
+            tokio::time::sleep(Duration::from_secs(1)).await;
+
+            let now = std::time::Instant::now();
+            let protocol = self.protocol.lock().await;
+            let peers = protocol.peers().clone();
+            drop(protocol);
+
+            // Check each connection for keep-alive and rekey needs
+            let connections = self.connections.read().await;
+            for conn in connections.values() {
+                // Get peer info
+                if let Some(peer_info) = peers.get(&conn.peer_public_key) {
+                    let protocol = self.protocol.lock().await;
+
+                    // Find session for this peer
+                    if let Some((session_id, session)) = protocol.find_session_by_peer(&conn.peer_public_key) {
+                        let time_since_send = now.duration_since(session.last_send);
+
+                        // Check if we need to send keep-alive
+                        if let Some(keepalive_interval) = peer_info.persistent_keepalive {
+                            let keepalive_duration = Duration::from_secs(keepalive_interval as u64);
+
+                            if time_since_send >= keepalive_duration {
+                                let peer_key_hex = hex::encode(conn.peer_public_key);
+                                debug!(
+                                    conn_id = conn.id.0,
+                                    session_id = session_id,
+                                    peer_public_key = &peer_key_hex[..8],
+                                    time_since_send = ?time_since_send,
+                                    keepalive_interval = keepalive_interval,
+                                    "Time since send exceeded interval, triggering keep-alive"
+                                );
+                                drop(protocol);
+                                if let Err(e) = conn.send_keepalive().await {
+                                    error!(
+                                        conn_id = conn.id.0,
+                                        error = ?e,
+                                        "Failed to send keep-alive"
+                                    );
+                                }
+                                continue;
+                            }
+                        } else {
+                            // No persistent keepalive configured, but check default timeout
+                            if time_since_send >= KEEPALIVE_TIMEOUT {
+                                let peer_key_hex = hex::encode(conn.peer_public_key);
+                                debug!(
+                                    conn_id = conn.id.0,
+                                    session_id = session_id,
+                                    peer_public_key = &peer_key_hex[..8],
+                                    time_since_send = ?time_since_send,
+                                    "Time since send exceeded default timeout, triggering keep-alive"
+                                );
+                                drop(protocol);
+                                if let Err(e) = conn.send_keepalive().await {
+                                    error!(
+                                        conn_id = conn.id.0,
+                                        error = ?e,
+                                        "Failed to send keep-alive"
+                                    );
+                                }
+                                continue;
+                            }
+                        }
+
+                        // Check if session needs rekey
+                        if protocol.needs_rekey(session_id) {
+                            use tracing::info;
+                            let peer_key_hex = hex::encode(conn.peer_public_key);
+                            let session_age = now.duration_since(session.created_at);
+                            info!(
+                                conn_id = conn.id.0,
+                                session_id = session_id,
+                                peer_public_key = &peer_key_hex[..8],
+                                session_age = ?session_age,
+                                "REKEY: Session age exceeded REKEY_AFTER_TIME, initiating new handshake"
+                            );
+
+                            // Get endpoint
+                            let endpoint = session.endpoint.unwrap_or(conn.peer_addr);
+                            drop(protocol);
+
+                            // Initiate new handshake
+                            let mut protocol = self.protocol.lock().await;
+                            match protocol.initiate_handshake(&conn.peer_public_key) {
+                                Ok(handshake_init) => {
+                                    let new_sender_id = handshake_init.sender;
+                                    match handshake_init.to_bytes() {
+                                        Ok(init_bytes) => {
+                                            drop(protocol);
+                                            if let Err(e) = self.udp_socket.send_to(&init_bytes, endpoint).await {
+                                                error!(
+                                                    conn_id = conn.id.0,
+                                                    error = ?e,
+                                                    "REKEY: Failed to send rekey handshake"
+                                                );
+                                            } else {
+                                                info!(
+                                                    conn_id = conn.id.0,
+                                                    new_sender_id = new_sender_id,
+                                                    endpoint = %endpoint,
+                                                    "REKEY: Sent rekey handshake initiation"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                conn_id = conn.id.0,
+                                                error = %e,
+                                                "REKEY: Failed to serialize rekey handshake"
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(
+                                        conn_id = conn.id.0,
+                                        error = ?e,
+                                        "REKEY: Failed to initiate rekey handshake"
+                                    );
+                                }
+                            }
+                        } else {
+                            drop(protocol);
+                        }
+                    } else {
+                        drop(protocol);
+                    }
+                }
+            }
+        }
+
+        debug!("Maintenance task stopped");
+        Ok(())
+    }
+
     /// Shutdown the server
     pub async fn close(self) -> Result<(), Error> {
         self.running.store(false, Ordering::SeqCst);
@@ -572,6 +742,11 @@ impl Server {
     /// Get the local bound address
     pub fn local_addr(&self) -> Result<SocketAddr, Error> {
         self.udp_socket.local_addr().map_err(Error::from)
+    }
+
+    /// Get the protocol instance (for testing/inspection)
+    pub fn protocol(&self) -> &Arc<Mutex<crate::protocol::WireGuardProtocol>> {
+        &self.protocol
     }
 }
 

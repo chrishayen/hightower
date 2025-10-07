@@ -24,6 +24,9 @@ This crate implements the core cryptographic handshake protocol used by WireGuar
   - Session key management
   - Peer configuration
   - Replay protection (anti-replay window)
+  - Automatic session rekeying (REKEY_AFTER_TIME)
+  - Keep-alive packet support
+  - Endpoint roaming for mobile devices
 
 ## What's NOT Implemented
 
@@ -32,8 +35,6 @@ This is **not** a complete VPN implementation. The following components are not 
 - **TUN/TAP Interface**: No virtual network interface creation or management
 - **Routing**: No IP routing, forwarding, or allowed-IPs enforcement
 - **Cookie Mechanism**: No DoS protection via cookies (Message Type 3)
-- **Key Rotation**: No automatic session key rekeying
-- **Production Features**: No timers or keepalives
 
 This library is suitable for:
 - Learning WireGuard's cryptographic protocol
@@ -48,10 +49,10 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # For handshake protocol only
-hightower-wireguard = "0.1.4"
+hightower-wireguard = "0.1.5"
 
 # For transport layer (UDP Server, Listener, Conn)
-hightower-wireguard = { version = "0.1.4", features = ["transport"] }
+hightower-wireguard = { version = "0.1.5", features = ["transport"] }
 ```
 
 ## Usage
@@ -173,12 +174,18 @@ async fn main() {
     alice_server.add_peer(bob_public, Some("127.0.0.1:8081".parse().unwrap())).await.unwrap();
     bob_server.add_peer(alice_public, Some("127.0.0.1:8080".parse().unwrap())).await.unwrap();
 
-    // Start packet processing loops
+    // Start packet processing loops and maintenance tasks
     let alice_clone = alice_server.clone();
     tokio::spawn(async move { alice_clone.run().await });
 
     let bob_clone = bob_server.clone();
     tokio::spawn(async move { bob_clone.run().await });
+
+    // Start maintenance tasks for keep-alive and rekey
+    let alice_maintenance = alice_server.clone();
+    let bob_maintenance = bob_server.clone();
+    tokio::spawn(async move { alice_maintenance.run_maintenance().await });
+    tokio::spawn(async move { bob_maintenance.run_maintenance().await });
 
     // Wait for servers to be ready
     alice_server.wait_until_ready().await.unwrap();
@@ -205,12 +212,41 @@ async fn main() {
 }
 ```
 
+### Keep-Alive Configuration
+
+Configure persistent keep-alive to maintain NAT mappings and detect dead peers:
+
+```rust
+use hightower_wireguard::protocol::PeerInfo;
+
+// Configure Alice to send keep-alive packets to Bob every 25 seconds
+let peer_info = PeerInfo {
+    public_key: bob_public,
+    preshared_key: None,
+    endpoint: Some("127.0.0.1:8081".parse().unwrap()),
+    allowed_ips: Vec::new(),
+    persistent_keepalive: Some(25), // seconds
+};
+
+alice_server.add_peer(bob_public, Some("127.0.0.1:8081".parse().unwrap())).await.unwrap();
+
+// Update the peer with keep-alive configuration
+{
+    let mut protocol = alice_server.protocol().lock().await;
+    protocol.remove_peer(&bob_public);
+    protocol.add_peer(peer_info);
+}
+```
+
 The transport layer provides:
 - **Server**: UDP socket management and packet routing
 - **Listener**: Accept incoming connections after handshakes
 - **Conn**: Bidirectional encrypted communication channel
 - Automatic handshake handling and session management
 - Message encryption/decryption using session keys
+- Automatic keep-alive packets (configurable per-peer)
+- Automatic session rekeying after 120 seconds
+- Endpoint roaming support for mobile devices
 
 ## Testing
 

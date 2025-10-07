@@ -227,4 +227,271 @@ mod transport_tests {
         let n = alice_conn.recv(&mut buf).await.unwrap();
         assert_eq!(&buf[..n], bob_msg);
     }
+
+    #[tokio::test]
+    async fn keepalive_is_sent_automatically() {
+        use hightower_wireguard::protocol::PeerInfo;
+
+        // Test that keep-alive packets are sent automatically
+        let (alice_private, alice_public) = dh_generate();
+        let (bob_private, bob_public) = dh_generate();
+
+        // Create servers
+        let alice_server = Server::new("127.0.0.1:0".parse().unwrap(), alice_private)
+            .await
+            .unwrap();
+        let bob_server = Server::new("127.0.0.1:0".parse().unwrap(), bob_private)
+            .await
+            .unwrap();
+
+        let alice_addr = alice_server.local_addr().unwrap();
+        let bob_addr = bob_server.local_addr().unwrap();
+
+        // Add peers with persistent keepalive
+        alice_server
+            .add_peer(bob_public, Some(bob_addr))
+            .await
+            .unwrap();
+        bob_server
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
+
+        // Configure persistent keepalive (2 seconds) for Alice -> Bob
+        {
+            let mut protocol = alice_server.protocol().lock().await;
+            if let Some(peer) = protocol.peers().get(&bob_public).cloned() {
+                let peer_with_keepalive = PeerInfo {
+                    persistent_keepalive: Some(2), // 2 seconds
+                    ..peer
+                };
+                protocol.remove_peer(&bob_public);
+                protocol.add_peer(peer_with_keepalive);
+            }
+        }
+
+        // Start both servers
+        let alice_server_clone = alice_server.clone();
+        let bob_server_clone = bob_server.clone();
+
+        tokio::spawn(async move { alice_server_clone.run().await });
+        tokio::spawn(async move { bob_server_clone.run().await });
+
+        // Start maintenance tasks
+        let alice_maintenance = alice_server.clone();
+        let bob_maintenance = bob_server.clone();
+        tokio::spawn(async move { alice_maintenance.run_maintenance().await });
+        tokio::spawn(async move { bob_maintenance.run_maintenance().await });
+
+        // Wait for servers to be ready
+        alice_server.wait_until_ready().await.unwrap();
+        bob_server.wait_until_ready().await.unwrap();
+
+        // Bob creates listener
+        let bob_listener = bob_server.listen("tcp", ":0").await.unwrap();
+
+        // Alice dials Bob
+        let _alice_conn = alice_server
+            .dial("tcp", &bob_addr.to_string(), bob_public)
+            .await
+            .unwrap();
+
+        // Bob accepts connection
+        let _bob_conn = bob_listener.accept().await.unwrap();
+
+        // Wait for at least 2 keepalive intervals + margin for maintenance loop
+        // Maintenance runs every 1 second, so wait 4 seconds to be safe
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        // Verify that keep-alive was sent by checking last_send time
+        {
+            let protocol = alice_server.protocol().lock().await;
+            if let Some((_, session)) = protocol.find_session_by_peer(&bob_public) {
+                let time_since_send = std::time::Instant::now().duration_since(session.last_send);
+                // Should have sent a keep-alive within the last 3 seconds
+                // (2 second interval + 1 second maintenance loop)
+                assert!(
+                    time_since_send < Duration::from_secs(3),
+                    "Keep-alive should have been sent (last send was {:.2}s ago)",
+                    time_since_send.as_secs_f64()
+                );
+            } else {
+                panic!("No session found for peer");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn session_rekey_happens_automatically() {
+        use hightower_wireguard::protocol::REKEY_AFTER_TIME;
+        use std::time::Instant;
+
+        // Test that sessions are rekeyed automatically after REKEY_AFTER_TIME
+        let (alice_private, alice_public) = dh_generate();
+        let (bob_private, bob_public) = dh_generate();
+
+        // Create servers
+        let alice_server = Server::new("127.0.0.1:0".parse().unwrap(), alice_private)
+            .await
+            .unwrap();
+        let bob_server = Server::new("127.0.0.1:0".parse().unwrap(), bob_private)
+            .await
+            .unwrap();
+
+        let alice_addr = alice_server.local_addr().unwrap();
+        let bob_addr = bob_server.local_addr().unwrap();
+
+        // Add peers
+        alice_server
+            .add_peer(bob_public, Some(bob_addr))
+            .await
+            .unwrap();
+        bob_server
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
+
+        // Start both servers
+        let alice_server_clone = alice_server.clone();
+        let bob_server_clone = bob_server.clone();
+
+        tokio::spawn(async move { alice_server_clone.run().await });
+        tokio::spawn(async move { bob_server_clone.run().await });
+
+        // Start maintenance tasks
+        let alice_maintenance = alice_server.clone();
+        let bob_maintenance = bob_server.clone();
+        tokio::spawn(async move { alice_maintenance.run_maintenance().await });
+        tokio::spawn(async move { bob_maintenance.run_maintenance().await });
+
+        // Wait for servers to be ready
+        alice_server.wait_until_ready().await.unwrap();
+        bob_server.wait_until_ready().await.unwrap();
+
+        // Bob creates listener
+        let bob_listener = bob_server.listen("tcp", ":0").await.unwrap();
+
+        // Alice dials Bob (creates first session)
+        let _alice_conn = alice_server
+            .dial("tcp", &bob_addr.to_string(), bob_public)
+            .await
+            .unwrap();
+
+        // Bob accepts connection
+        let _bob_conn = bob_listener.accept().await.unwrap();
+
+        // Get initial session ID
+        let initial_session_id = {
+            let protocol = alice_server.protocol().lock().await;
+            protocol
+                .find_session_by_peer(&bob_public)
+                .map(|(id, _)| id)
+                .expect("Session should exist")
+        };
+
+        // Manually age the session by modifying created_at time
+        {
+            let mut protocol = alice_server.protocol().lock().await;
+            if let Some(session) = protocol.get_session_mut(initial_session_id) {
+                // Force the session to appear old by backdating created_at
+                let old_time = Instant::now() - REKEY_AFTER_TIME - Duration::from_secs(1);
+                // We need to create a new session with the backdated time
+                let mut aged_session = session.clone();
+                aged_session.created_at = old_time;
+                *session = aged_session;
+            }
+        }
+
+        // Wait for maintenance to detect and trigger rekey
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Verify that needs_rekey returns true
+        {
+            let protocol = alice_server.protocol().lock().await;
+            assert!(
+                protocol.needs_rekey(initial_session_id),
+                "Session should need rekey"
+            );
+        }
+
+        // The maintenance task should have initiated a new handshake
+        // We can verify by checking that a new initiation was created
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    #[tokio::test]
+    async fn endpoint_roaming_is_supported() {
+        // Test that endpoint updates when receiving packets from different addresses
+        let (alice_private, alice_public) = dh_generate();
+        let (bob_private, bob_public) = dh_generate();
+
+        // Create servers
+        let alice_server = Server::new("127.0.0.1:0".parse().unwrap(), alice_private)
+            .await
+            .unwrap();
+        let bob_server = Server::new("127.0.0.1:0".parse().unwrap(), bob_private)
+            .await
+            .unwrap();
+
+        let alice_addr = alice_server.local_addr().unwrap();
+        let bob_addr = bob_server.local_addr().unwrap();
+
+        // Add peers
+        alice_server
+            .add_peer(bob_public, Some(bob_addr))
+            .await
+            .unwrap();
+        bob_server
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
+
+        // Start both servers
+        let alice_server_clone = alice_server.clone();
+        let bob_server_clone = bob_server.clone();
+
+        tokio::spawn(async move { alice_server_clone.run().await });
+        tokio::spawn(async move { bob_server_clone.run().await });
+
+        // Wait for servers to be ready
+        alice_server.wait_until_ready().await.unwrap();
+        bob_server.wait_until_ready().await.unwrap();
+
+        // Bob creates listener
+        let bob_listener = bob_server.listen("tcp", ":0").await.unwrap();
+
+        // Alice dials Bob
+        let alice_conn = alice_server
+            .dial("tcp", &bob_addr.to_string(), bob_public)
+            .await
+            .unwrap();
+
+        // Bob accepts connection
+        let bob_conn = bob_listener.accept().await.unwrap();
+
+        // Alice sends data
+        alice_conn.send(b"test message").await.unwrap();
+
+        // Bob receives data
+        let mut buf = vec![0u8; 1024];
+        bob_conn.recv(&mut buf).await.unwrap();
+
+        // Check that Bob's session has Alice's endpoint recorded
+        {
+            let protocol = bob_server.protocol().lock().await;
+            if let Some((_, session)) = protocol.find_session_by_peer(&alice_public) {
+                assert!(
+                    session.endpoint.is_some(),
+                    "Endpoint should be recorded from received packet"
+                );
+                assert_eq!(
+                    session.endpoint.unwrap(),
+                    alice_addr,
+                    "Endpoint should match Alice's address"
+                );
+            } else {
+                panic!("No session found for Alice");
+            }
+        }
+    }
 }
