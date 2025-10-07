@@ -1,13 +1,13 @@
 .PHONY: build deploy clean
 
-BINARY_NAME = hightower-stun
+BINARY_NAME = ht-stun-server
 REMOTE_USER = root
 REMOTE_HOST = 46.62.214.173
 REMOTE_PATH = /usr/local/bin/$(BINARY_NAME)
 TARGET = aarch64-unknown-linux-gnu
 
 build:
-	cargo build --release --target $(TARGET)
+	cargo build --release --target $(TARGET) --bin $(BINARY_NAME)
 
 deploy: build
 	scp target/$(TARGET)/release/$(BINARY_NAME) $(REMOTE_USER)@$(REMOTE_HOST):$(REMOTE_PATH)

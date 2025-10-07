@@ -1,5 +1,5 @@
 use crate::{StunError, StunMessage, XOR_MAPPED_ADDRESS, MAPPED_ADDRESS};
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 
 pub struct StunClient {
@@ -27,9 +27,11 @@ impl StunClient {
     }
 
     pub fn get_public_address(&self, server: &str) -> Result<SocketAddr, StunError> {
-        let server_addr: SocketAddr = server
-            .parse()
-            .map_err(|_| StunError::IoError("Invalid server address".to_string()))?;
+        let server_addr = server
+            .to_socket_addrs()
+            .map_err(|e| StunError::IoError(format!("Failed to resolve server address: {}", e)))?
+            .next()
+            .ok_or_else(|| StunError::IoError("No addresses resolved".to_string()))?;
 
         let request = StunMessage::new_binding_request();
         let request_bytes = request.encode();
