@@ -8,6 +8,12 @@ repository = "https://github.com/chrishayen/hightower-stun"
 keywords = ["stun", "nat", "network", "p2p", "rfc8489"]
 categories = ["network-programming"]
 readme = "README.md"
+exclude = [
+    "rfc8489.txt",
+    "Makefile",
+    ".cargo/",
+    "target/",
+]
 
 [dependencies]
 
