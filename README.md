@@ -23,6 +23,7 @@ This crate implements the core cryptographic handshake protocol used by WireGuar
   - Responder state machine
   - Session key management
   - Peer configuration
+  - Replay protection (anti-replay window)
 
 ## What's NOT Implemented
 
@@ -32,7 +33,7 @@ This is **not** a complete VPN implementation. The following components are not 
 - **Routing**: No IP routing, forwarding, or allowed-IPs enforcement
 - **Cookie Mechanism**: No DoS protection via cookies (Message Type 3)
 - **Key Rotation**: No automatic session key rekeying
-- **Production Features**: No timers, replay protection, or keepalives
+- **Production Features**: No timers or keepalives
 
 This library is suitable for:
 - Learning WireGuard's cryptographic protocol
@@ -47,10 +48,10 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # For handshake protocol only
-hightower-wireguard = "0.1.3"
+hightower-wireguard = "0.1.4"
 
 # For transport layer (UDP Server, Listener, Conn)
-hightower-wireguard = { version = "0.1.3", features = ["transport"] }
+hightower-wireguard = { version = "0.1.4", features = ["transport"] }
 ```
 
 ## Usage
