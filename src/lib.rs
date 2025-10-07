@@ -10,6 +10,9 @@ pub mod messages;
 pub mod protocol;
 /// Handshake responder implementation
 pub mod responder;
+/// WireGuard transport layer (UDP-based Server, Listener, Conn)
+#[cfg(feature = "transport")]
+pub mod transport;
 
 /// Errors that can occur during WireGuard protocol operations
 #[derive(Error, Debug)]

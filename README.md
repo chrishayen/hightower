@@ -28,11 +28,9 @@ This crate implements the core cryptographic handshake protocol used by WireGuar
 
 This is **not** a complete VPN implementation. The following components are not included:
 
-- **Network Transport**: No UDP socket handling or packet I/O
 - **TUN/TAP Interface**: No virtual network interface creation or management
 - **Routing**: No IP routing, forwarding, or allowed-IPs enforcement
 - **Cookie Mechanism**: No DoS protection via cookies (Message Type 3)
-- **Transport Data Messages**: No actual data encryption/decryption (Message Type 4)
 - **Key Rotation**: No automatic session key rekeying
 - **Production Features**: No timers, replay protection, or keepalives
 
@@ -48,7 +46,11 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
+# For handshake protocol only
 hightower-wireguard = "0.1.3"
+
+# For transport layer (UDP Server, Listener, Conn)
+hightower-wireguard = { version = "0.1.3", features = ["transport"] }
 ```
 
 ## Usage
@@ -144,12 +146,81 @@ The following message types support serialization:
 - `HandshakeResponse`: 92 bytes
 - `TransportData`: 16 bytes + variable packet length
 
+## Transport Layer
+
+With the `transport` feature enabled, you can use the high-level UDP-based transport layer:
+
+```rust
+use hightower_wireguard::crypto::dh_generate;
+use hightower_wireguard::transport::Server;
+
+#[tokio::main]
+async fn main() {
+    // Generate keys
+    let (alice_private, alice_public) = dh_generate();
+    let (bob_private, bob_public) = dh_generate();
+
+    // Create servers
+    let alice_server = Server::new("127.0.0.1:8080".parse().unwrap(), alice_private)
+        .await
+        .unwrap();
+    let bob_server = Server::new("127.0.0.1:8081".parse().unwrap(), bob_private)
+        .await
+        .unwrap();
+
+    // Add peers
+    alice_server.add_peer(bob_public, Some("127.0.0.1:8081".parse().unwrap())).await.unwrap();
+    bob_server.add_peer(alice_public, Some("127.0.0.1:8080".parse().unwrap())).await.unwrap();
+
+    // Start packet processing loops
+    let alice_clone = alice_server.clone();
+    tokio::spawn(async move { alice_clone.run().await });
+
+    let bob_clone = bob_server.clone();
+    tokio::spawn(async move { bob_clone.run().await });
+
+    // Wait for servers to be ready
+    alice_server.wait_until_ready().await.unwrap();
+    bob_server.wait_until_ready().await.unwrap();
+
+    // Bob listens for connections
+    let bob_listener = bob_server.listen("tcp", ":0").await.unwrap();
+
+    // Alice dials Bob
+    let alice_conn = alice_server
+        .dial("tcp", "127.0.0.1:8081", bob_public)
+        .await
+        .unwrap();
+
+    // Bob accepts the connection
+    let bob_conn = bob_listener.accept().await.unwrap();
+
+    // Send and receive data
+    alice_conn.send(b"Hello from Alice!").await.unwrap();
+
+    let mut buf = vec![0u8; 1024];
+    let n = bob_conn.recv(&mut buf).await.unwrap();
+    println!("Bob received: {}", String::from_utf8_lossy(&buf[..n]));
+}
+```
+
+The transport layer provides:
+- **Server**: UDP socket management and packet routing
+- **Listener**: Accept incoming connections after handshakes
+- **Conn**: Bidirectional encrypted communication channel
+- Automatic handshake handling and session management
+- Message encryption/decryption using session keys
+
 ## Testing
 
 Run the test suite:
 
 ```bash
+# Test handshake protocol only
 cargo test
+
+# Test with transport layer
+cargo test --features transport
 ```
 
 ## References
