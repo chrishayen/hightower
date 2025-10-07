@@ -4,13 +4,14 @@ A lightweight, RFC 8489-compliant STUN (Session Traversal Utilities for NAT) ser
 
 ## Features
 
-- **RFC 8489 Compliant**: Full implementation of the STUN protocol
+- **RFC 8489 Compliant**: Implements Basic STUN Server specification (Section 12)
 - **Client & Server**: Both client and server implementations included
 - **XOR-MAPPED-ADDRESS**: Proper support for reflexive address discovery
 - **IPv4 & IPv6**: Support for both address families
 - **DNS Resolution**: Client supports domain names and IP addresses
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Zero Dependencies**: Pure Rust implementation with only standard library
+- **Lightweight**: Focused on core NAT traversal without authentication overhead
 
 ## Usage
 
@@ -150,6 +151,35 @@ cargo run --example get_public_ip stun.l.google.com
 cargo run --bin ht-stun-server &
 cargo run --bin ht-stun-client localhost
 ```
+
+## Implementation Status
+
+This library implements a **Basic STUN Server** as defined in RFC 8489, Section 12. It focuses on the core functionality needed for NAT traversal and public IP discovery.
+
+### Implemented Features
+
+- ✅ Binding method (request/response)
+- ✅ XOR-MAPPED-ADDRESS attribute (IPv4 and IPv6)
+- ✅ MAPPED-ADDRESS attribute (fallback, decode only)
+- ✅ Transaction ID generation and validation
+- ✅ Message encoding/decoding with proper padding
+- ✅ UDP transport
+- ✅ DNS resolution
+
+### Not Implemented
+
+Per RFC 8489 Section 12, Basic STUN Servers **SHOULD NOT** implement:
+- Authentication (short-term and long-term credentials)
+- ALTERNATE-SERVER mechanism
+
+Additional features not implemented:
+- Error responses (server silently ignores invalid requests)
+- TCP/TLS/DTLS transports (UDP is sufficient for basic operation)
+- Client retransmission logic
+- FINGERPRINT attribute (optional integrity checking)
+- MESSAGE-INTEGRITY attributes
+
+See [IMPLEMENTATION.md](IMPLEMENTATION.md) for a complete feature breakdown.
 
 ## References
 
