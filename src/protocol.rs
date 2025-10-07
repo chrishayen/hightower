@@ -1,6 +1,7 @@
 use crate::crypto::{PrivateKey, PublicKey25519, dh_generate};
 use crate::initiator::{InitiatorState, SessionKeys};
 use crate::messages::{HandshakeInitiation, HandshakeResponse};
+use crate::replay::ReplayWindow;
 use crate::responder::ResponderState;
 use crate::{Result, WireGuardError};
 use std::collections::HashMap;
@@ -32,6 +33,8 @@ pub struct ActiveSession {
     pub created_at: std::time::Instant,
     /// Timestamp of last activity on this session
     pub last_used: std::time::Instant,
+    /// Replay protection window for received packets
+    pub replay_window: ReplayWindow,
 }
 
 /// Main WireGuard protocol handler managing peers and sessions
@@ -146,6 +149,7 @@ impl WireGuardProtocol {
             peer_public_key,
             created_at: std::time::Instant::now(),
             last_used: std::time::Instant::now(),
+            replay_window: ReplayWindow::new(),
         };
 
         // Store the active session
@@ -184,6 +188,7 @@ impl WireGuardProtocol {
             peer_public_key,
             created_at: std::time::Instant::now(),
             last_used: std::time::Instant::now(),
+            replay_window: ReplayWindow::new(),
         };
 
         // Store the active session using the sender ID from the response
@@ -195,6 +200,27 @@ impl WireGuardProtocol {
     /// Get active session by sender ID
     pub fn get_session(&self, sender_id: u32) -> Option<&ActiveSession> {
         self.active_sessions.get(&sender_id)
+    }
+
+    /// Get mutable active session by sender ID
+    pub fn get_session_mut(&mut self, sender_id: u32) -> Option<&mut ActiveSession> {
+        self.active_sessions.get_mut(&sender_id)
+    }
+
+    /// Check and update replay window for a received packet
+    ///
+    /// Returns Ok(()) if the counter is valid and not a replay, Err otherwise
+    pub fn check_replay(&mut self, sender_id: u32, counter: u64) -> Result<()> {
+        let session = self
+            .get_session_mut(sender_id)
+            .ok_or_else(|| WireGuardError::ProtocolError("No active session".to_string()))?;
+
+        if session.replay_window.check_and_update(counter) {
+            session.last_used = std::time::Instant::now();
+            Ok(())
+        } else {
+            Err(WireGuardError::ProtocolError("Replay detected".to_string()))
+        }
     }
 
     /// Get a reference to all active sessions

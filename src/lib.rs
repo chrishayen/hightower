@@ -8,6 +8,8 @@ pub mod initiator;
 pub mod messages;
 /// High-level protocol implementation
 pub mod protocol;
+/// Replay protection implementation
+pub mod replay;
 /// Handshake responder implementation
 pub mod responder;
 /// WireGuard transport layer (UDP-based Server, Listener, Conn)
@@ -168,5 +170,64 @@ mod tests {
         assert!(bob.get_session(response.sender).is_some());
 
         println!("PSK handshake successful!");
+    }
+
+    #[test]
+    fn test_replay_protection() {
+        // Generate keys for both peers
+        let (alice_private, alice_public) = dh_generate();
+        let (bob_private, bob_public) = dh_generate();
+
+        // Create protocol instances
+        let mut alice = WireGuardProtocol::new(Some(alice_private));
+        let mut bob = WireGuardProtocol::new(Some(bob_private));
+
+        // Add each other as peers
+        alice.add_peer(PeerInfo {
+            public_key: bob_public,
+            preshared_key: None,
+            endpoint: None,
+            allowed_ips: Vec::new(),
+            persistent_keepalive: None,
+        });
+
+        bob.add_peer(PeerInfo {
+            public_key: alice_public,
+            preshared_key: None,
+            endpoint: None,
+            allowed_ips: Vec::new(),
+            persistent_keepalive: None,
+        });
+
+        // Complete handshake
+        let initiation = alice.initiate_handshake(&bob_public).unwrap();
+        let response = bob.process_initiation(&initiation).unwrap();
+        alice.process_response(&response).unwrap();
+
+        let session_id = response.sender;
+
+        // Test sequential counters
+        assert!(bob.check_replay(session_id, 1).is_ok());
+        assert!(bob.check_replay(session_id, 2).is_ok());
+        assert!(bob.check_replay(session_id, 3).is_ok());
+
+        // Test replay detection
+        assert!(bob.check_replay(session_id, 2).is_err()); // Replay of counter 2
+        assert!(bob.check_replay(session_id, 1).is_err()); // Replay of counter 1
+
+        // Test out-of-order within window
+        assert!(bob.check_replay(session_id, 10).is_ok());
+        assert!(bob.check_replay(session_id, 5).is_ok());
+        assert!(bob.check_replay(session_id, 8).is_ok());
+
+        // Test replay of out-of-order packets
+        assert!(bob.check_replay(session_id, 5).is_err());
+        assert!(bob.check_replay(session_id, 8).is_err());
+
+        // Test counter too old (outside window)
+        assert!(bob.check_replay(session_id, 3000).is_ok());
+        assert!(bob.check_replay(session_id, 500).is_err()); // Too old
+
+        println!("Replay protection test successful!");
     }
 }
