@@ -684,6 +684,9 @@ async fn deregister_node(
     kv.put_bytes(&token_key, b"__DELETED__")
         .map_err(|err| RootApiError::Storage(format!("failed to mark token deleted: {}", err)))?;
 
+    IpAllocator::release_ip(&kv, &node_id)
+        .map_err(|err| RootApiError::Storage(format!("failed to release IP: {}", err)))?;
+
     debug!(node_id = %node_id, "Deregistered node");
     Ok(StatusCode::NO_CONTENT)
 }
