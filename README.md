@@ -24,7 +24,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-client-lib = "0.1.0"
+hightower-client = "0.1.0"
 ```
 
 ## Usage
@@ -32,7 +32,7 @@ hightower-client-lib = "0.1.0"
 ### Basic Connection
 
 ```rust
-use hightower_client_lib::HightowerConnection;
+use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Custom Gateway URL
 
 ```rust
-use hightower_client_lib::HightowerConnection;
+use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
