@@ -1,7 +1,7 @@
 use hightower_stun::client::StunClient;
-use std::net::{IpAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, warn};
 
 const DEFAULT_STUN_SERVER: &str = "gateway.shotgun.dev:3478";
 const DEFAULT_WIREGUARD_PORT: u16 = 51820;
@@ -43,6 +43,55 @@ pub fn discover_network_info(
         public_port: public_addr.port(),
         local_ip: local_ip.to_string(),
         local_port,
+    })
+}
+
+/// Discovers network information using a bound socket address
+///
+/// This is used when a transport server is already bound to a specific port.
+/// Uses STUN to discover the public address and uses the actual bound port.
+///
+/// # Arguments
+/// * `local_addr` - The bound socket address (from transport.local_addr())
+/// * `stun_server` - Optional STUN server address. Defaults to gateway.shotgun.dev:3478.
+///
+/// # Returns
+/// Network information or an error
+pub fn discover_with_bound_address(
+    local_addr: SocketAddr,
+    stun_server: Option<&str>,
+) -> Result<crate::NetworkInfo, Box<dyn std::error::Error>> {
+    let stun_server = stun_server.unwrap_or(DEFAULT_STUN_SERVER);
+
+    debug!("Discovering network info for bound address: {}", local_addr);
+
+    // Use STUN to discover public address
+    let client = StunClient::new()?.with_timeout(Duration::from_secs(5));
+    let public_addr = client.get_public_address(stun_server)?;
+
+    debug!(
+        public_ip = %public_addr.ip(),
+        public_port = public_addr.port(),
+        "Discovered public address via STUN"
+    );
+
+    // Discover local IP
+    let local_ip = discover_local_ip()?;
+
+    // Warn if local IP from socket doesn't match discovered local IP
+    if local_addr.ip() != local_ip && !local_addr.ip().is_unspecified() {
+        warn!(
+            bound_ip = %local_addr.ip(),
+            discovered_ip = %local_ip,
+            "Bound IP differs from discovered local IP"
+        );
+    }
+
+    Ok(crate::NetworkInfo {
+        public_ip: public_addr.ip().to_string(),
+        public_port: public_addr.port(),
+        local_ip: local_ip.to_string(),
+        local_port: local_addr.port(),
     })
 }
 

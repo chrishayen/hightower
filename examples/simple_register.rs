@@ -1,25 +1,24 @@
-use hightower_client_lib::HightowerClient;
+use hightower_client_lib::HightowerConnection;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token = std::env::var("HT_AUTH_TOKEN")
         .expect("HT_AUTH_TOKEN environment variable must be set");
 
-    let client = HightowerClient::with_auth_token(auth_token)?;
+    println!("Connecting to gateway...");
 
-    println!("Registering with gateway...");
+    let connection = HightowerConnection::connect_with_auth_token(auth_token).await?;
 
-    let result = client.register()?;
+    println!("\nConnection successful!");
+    println!("  Node ID: {}", connection.node_id());
+    println!("  Assigned IP: {}", connection.assigned_ip());
 
-    println!("\nRegistration successful!");
-    println!("  Node ID: {}", result.node_id);
-    println!("  Token: {}", result.token);
-    println!("  Assigned IP: {}", result.assigned_ip);
-    println!("  Public Key: {}", result.public_key_hex);
-    println!("  Private Key: {}", result.private_key_hex);
-    println!("  Gateway Public Key: {}", result.gateway_public_key_hex);
+    println!("\nTransport ready for communication");
 
-    println!("\nTo deregister, run:");
-    println!("  cargo run --example simple_deregister {}", result.token);
+    // Disconnect when done
+    connection.disconnect().await?;
+
+    println!("Disconnected from gateway");
 
     Ok(())
 }

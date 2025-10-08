@@ -1,23 +1,22 @@
-use hightower_client_lib::HightowerClient;
+// This example demonstrates that deregistration is now automatic.
+// Simply call connection.disconnect() and the library handles deregistration internally.
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
+use hightower_client_lib::HightowerConnection;
 
-    if args.len() < 2 {
-        eprintln!("Usage: cargo run --example simple_deregister <token>");
-        std::process::exit(1);
-    }
-
-    let token = &args[1];
-
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token = std::env::var("HT_AUTH_TOKEN")
         .expect("HT_AUTH_TOKEN environment variable must be set");
 
-    let client = HightowerClient::with_auth_token(auth_token)?;
+    println!("Connecting to gateway...");
 
-    println!("Deregistering node with token: {}...", &token[..8]);
+    let connection = HightowerConnection::connect_with_auth_token(auth_token).await?;
 
-    client.deregister(token)?;
+    println!("Connected! Node ID: {}", connection.node_id());
+    println!("\nNow disconnecting (this will automatically deregister)...");
+
+    // Disconnect handles deregistration automatically using internal token
+    connection.disconnect().await?;
 
     println!("Successfully deregistered!");
 

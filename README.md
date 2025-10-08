@@ -1,18 +1,22 @@
 # Hightower Client Library
 
-A Rust library for registering and managing nodes with a Hightower gateway.
+A Rust library for building applications that connect to Hightower gateways with integrated WireGuard transport.
 
 ## Overview
 
-This library provides a simple client interface for interacting with Hightower gateway APIs. It allows you to:
+This library provides a complete solution for connecting to Hightower gateways. It handles everything internally:
 
-- Register nodes with the gateway
-- Automatically discover network information (public/local IPs) via STUN
-- Generate WireGuard keypairs automatically
-- Deregister nodes
-- Handle authentication and error responses
+- WireGuard transport creation and management
+- Certificate/keypair generation
+- Network discovery via STUN using actual bound ports
+- Gateway registration
+- Peer configuration
+- Automatic deregistration on disconnect
 
-Everything is handled automatically - you only need to provide an auth token!
+**You only provide:** gateway URL and auth token
+**You get:** a working transport, node ID, and assigned IP
+
+Everything else is handled automatically!
 
 ## Installation
 
@@ -25,133 +29,148 @@ hightower-client-lib = "0.1.0"
 
 ## Usage
 
-### Basic Registration
+### Basic Connection
 
 ```rust
-use hightower_client_lib::HightowerClient;
+use hightower_client_lib::HightowerConnection;
 
-let client = HightowerClient::with_auth_token("your-auth-token")?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect with default gateway (http://127.0.0.1:8008)
+    let connection = HightowerConnection::connect_with_auth_token("your-auth-token").await?;
 
-// Everything is automatic:
-// - Keys generated
-// - Node name assigned by gateway
-// - Network info (public/local IPs) discovered via STUN
-let result = client.register()?;
+    // Access what you need
+    println!("Node ID: {}", connection.node_id());
+    println!("Assigned IP: {}", connection.assigned_ip());
 
-println!("Node ID: {}", result.node_id);
-println!("Assigned IP: {}", result.assigned_ip);
-println!("Token: {}", result.token);
-```
+    // Get transport for communication
+    let transport = connection.transport();
 
+    // Use the underlying server for send/receive operations
+    // See hightower-wireguard documentation for full API
+    // let server = transport.server();
 
-### Deregistration
+    // Disconnect (automatically deregisters)
+    connection.disconnect().await?;
 
-```rust
-use hightower_client_lib::HightowerClient;
-
-let client = HightowerClient::with_auth_token("your-auth-token")?;
-client.deregister("registration-token")?;
+    Ok(())
+}
 ```
 
 ### Custom Gateway URL
 
 ```rust
-use hightower_client_lib::HightowerClient;
+use hightower_client_lib::HightowerConnection;
 
-// Must specify http:// or https://
-let client = HightowerClient::new(
-    "https://gateway.example.com:8443",
-    "your-auth-token"
-)?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Must specify http:// or https://
+    let connection = HightowerConnection::connect(
+        "https://gateway.example.com:8443",
+        "your-auth-token"
+    ).await?;
 
-// Or with HTTP (for testing)
-let client = HightowerClient::new(
-    "http://localhost:8008",
-    "your-auth-token"
-)?;
+    println!("Connected to {}", connection.node_id());
+
+    connection.disconnect().await?;
+
+    Ok(())
+}
 ```
 
 ## Examples
 
 The library includes several examples:
 
-### Simple Registration
+### Simple Connection
 ```bash
 export HT_AUTH_TOKEN="your-token"
 cargo run --example simple_register
 ```
 
-### Remote Gateway
+### Custom Gateway URL
 ```bash
 export HT_AUTH_TOKEN="your-token"
-cargo run --example remote_gateway
-```
-
-### Deregistration
-```bash
-export HT_AUTH_TOKEN="your-token"
-cargo run --example simple_deregister <registration-token>
-```
-
-### Custom Endpoint
-```bash
-export HT_AUTH_TOKEN="your-token"
-export HT_GATEWAY_ENDPOINT="https://gateway.example.com/api/nodes"
+export HT_GATEWAY_URL="https://gateway.example.com:8443"
 cargo run --example custom_endpoint
+```
+
+### HTTPS Gateway
+```bash
+export HT_AUTH_TOKEN="your-token"
+cargo run --example https_gateway
+```
+
+### Auto Deregistration
+```bash
+export HT_AUTH_TOKEN="your-token"
+cargo run --example simple_deregister
 ```
 
 ## API Documentation
 
-### `HightowerClient`
+### `HightowerConnection`
 
-The main client struct for interacting with the gateway.
+The main connection struct with integrated WireGuard transport.
 
 #### Methods
 
-- `new(gateway_url: impl Into<String>, auth_token: impl Into<String>) -> Result<Self, ClientError>`
+- `async fn connect(gateway_url: impl Into<String>, auth_token: impl Into<String>) -> Result<Self, ClientError>`
 
-  Creates a new client with a custom gateway URL and auth token. The URL must include the scheme (http:// or https://).
+  Connects to a Hightower gateway with a custom URL. The URL must include the scheme (http:// or https://).
 
-- `with_auth_token(auth_token: impl Into<String>) -> Result<Self, ClientError>`
+  Handles everything internally:
+  - Generates WireGuard keypair
+  - Creates transport server on 0.0.0.0:0
+  - Discovers network info via STUN using actual bound port
+  - Registers with gateway
+  - Adds gateway as peer
 
-  Creates a new client with the default gateway (`http://127.0.0.1:8008`).
+  Returns a ready-to-use connection with working transport.
 
-- `register() -> Result<RegistrationResult, ClientError>`
+- `async fn connect_with_auth_token(auth_token: impl Into<String>) -> Result<Self, ClientError>`
 
-  Registers a node with the gateway. Automatically:
-  - Generates a WireGuard keypair
-  - Discovers network info (public/local IPs and ports) via STUN
-  - Receives assigned node name from gateway
+  Connects using the default gateway (`http://127.0.0.1:8008`).
 
-  Returns registration details including assigned node name, IP, token, and generated keys.
+- `fn node_id(&self) -> &str`
 
-- `deregister(token: &str) -> Result<(), ClientError>`
+  Returns the node ID assigned by the gateway.
 
-  Deregisters a node using its registration token.
+- `fn assigned_ip(&self) -> &str`
 
-### `RegistrationResult`
+  Returns the IP address assigned by the gateway.
 
-Contains the result of a successful registration.
+- `fn transport(&self) -> &TransportServer`
 
-**Fields:**
-- `node_id: String` - Node name assigned by the gateway
-- `token: String` - Token for deregistration
-- `gateway_public_key_hex: String` - Gateway's public key (hex-encoded)
-- `assigned_ip: String` - IP address assigned to the node
-- `public_key_hex: String` - Node's generated public key (hex-encoded)
-- `private_key_hex: String` - Node's generated private key (hex-encoded)
+  Returns the transport for sending/receiving data.
+
+- `async fn disconnect(self) -> Result<(), ClientError>`
+
+  Disconnects from the gateway and automatically deregisters using the internal token.
+
+### `TransportServer`
+
+Wrapper around the WireGuard transport.
+
+#### Methods
+
+- `fn server(&self) -> &Server`
+
+  Get a reference to the underlying hightower-wireguard `Server`.
+  Use this to access the full transport API for sending/receiving data.
 
 
 ### `ClientError`
 
-Error types returned by the client.
+Error types returned by the library.
 
 **Variants:**
-- `Configuration(String)` - Invalid configuration (e.g., empty endpoint)
+- `Configuration(String)` - Invalid configuration (e.g., empty endpoint, invalid URL)
 - `Request(reqwest::Error)` - HTTP request failed
 - `GatewayError { status: u16, message: String }` - Gateway returned error
 - `InvalidResponse(String)` - Unexpected response format
 - `NetworkDiscovery(String)` - Failed to discover network info via STUN
+- `Transport(String)` - Transport creation or operation failed
 
 ## Testing
 

@@ -1,6 +1,7 @@
-use hightower_client_lib::HightowerClient;
+use hightower_client_lib::HightowerConnection;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_token = std::env::var("HT_AUTH_TOKEN")
         .expect("HT_AUTH_TOKEN environment variable must be set");
 
@@ -8,20 +9,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
 
     println!("Using gateway URL: {}", gateway_url);
+    println!("Connecting to gateway...");
 
-    let client = HightowerClient::new(gateway_url, auth_token)?;
+    let connection = HightowerConnection::connect(gateway_url, auth_token).await?;
 
-    println!("Registering with gateway...");
+    println!("\nConnection successful!");
+    println!("  Node ID: {}", connection.node_id());
+    println!("  Assigned IP: {}", connection.assigned_ip());
 
-    let result = client.register()?;
+    println!("\nTransport ready for communication");
 
-    println!("\nRegistration successful!");
-    println!("  Node ID: {}", result.node_id);
-    println!("  Token: {}", result.token);
-    println!("  Assigned IP: {}", result.assigned_ip);
-    println!("  Public Key: {}", result.public_key_hex);
-    println!("  Private Key: {}", result.private_key_hex);
-    println!("  Gateway Public Key: {}", result.gateway_public_key_hex);
+    // Disconnect when done
+    connection.disconnect().await?;
 
     Ok(())
 }

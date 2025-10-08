@@ -1,13 +1,12 @@
-mod client;
+mod connection;
 mod error;
 mod ip_discovery;
-mod keys;
+mod transport;
 mod types;
 
-pub use client::HightowerClient;
+pub use connection::HightowerConnection;
 pub use error::ClientError;
-pub use keys::Keypair;
-pub use types::RegistrationResult;
+pub use transport::TransportServer;
 
-// NetworkInfo is internal only - users never specify it
+// Internal types
 pub(crate) use types::NetworkInfo;
