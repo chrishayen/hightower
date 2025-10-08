@@ -19,6 +19,7 @@ pub struct HightowerConnection {
     assigned_ip: String,
     token: String,
     endpoint: String,
+    #[allow(dead_code)] // Used when constructing from stored connection
     gateway_url: String,
     storage: Option<ConnectionStorage>,
 }

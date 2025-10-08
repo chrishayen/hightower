@@ -1,16 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistrationResult {
-    pub node_id: String,
-    pub token: String,
-    pub gateway_public_key_hex: String,
-    pub assigned_ip: String,
-    pub private_key_hex: String,
-    pub public_key_hex: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInfo {
     pub public_ip: String,
     pub public_port: u16,
