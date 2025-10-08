@@ -2,8 +2,8 @@ mod api;
 pub mod certificates;
 pub mod client;
 mod common;
-mod gateway_impl;
 mod ip_allocator;
+mod startup;
 pub mod wireguard_api;
 
 pub use common::*;

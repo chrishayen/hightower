@@ -44,7 +44,7 @@ struct ApiState {
 pub fn start(context: &CommonContext) {
     debug!("Gateway starting");
 
-    let certificate = crate::gateway_impl::startup();
+    let certificate = crate::startup::startup();
     persist_certificate(context, &certificate);
 
     let shared_kv = API_SHARED_KV
@@ -720,7 +720,7 @@ mod tests {
         let context = CommonContext::new(kv);
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
 
-        let certificate = crate::gateway_impl::startup();
+        let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
 
         let shared_kv = Arc::new(RwLock::new(context.kv.clone()));
@@ -809,7 +809,7 @@ mod tests {
         let context = CommonContext::new(kv);
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
 
-        let certificate = crate::gateway_impl::startup();
+        let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
 
         let state = ApiState {
@@ -865,7 +865,7 @@ mod tests {
         let context = CommonContext::new(kv);
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
 
-        let certificate = crate::gateway_impl::startup();
+        let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
 
         let state = ApiState {
@@ -896,7 +896,7 @@ mod tests {
         let context = CommonContext::new(kv);
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
 
-        let certificate = crate::gateway_impl::startup();
+        let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
 
         let state = ApiState {
