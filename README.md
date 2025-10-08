@@ -12,11 +12,22 @@ This library provides a complete solution for connecting to Hightower gateways. 
 - Gateway registration
 - Peer configuration
 - Automatic deregistration on disconnect
+- **Connection persistence and automatic restoration**
 
 **You only provide:** gateway URL and auth token
 **You get:** a working transport, node ID, and assigned IP
 
 Everything else is handled automatically!
+
+### Connection Persistence (New in 0.1.1)
+
+By default, connections are automatically persisted to `~/.hightower/gateway/<gateway>/`. When you reconnect to the same gateway:
+- The library reuses your stored WireGuard keys (same identity)
+- No re-registration needed with the gateway
+- Same node ID across application restarts
+- Only `disconnect()` removes the stored connection
+
+This makes your application's network identity stable across restarts!
 
 ## Installation
 
@@ -24,7 +35,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-client = "0.1.0"
+hightower-client = "0.1.1"
 ```
 
 ## Usage
@@ -88,6 +99,24 @@ export HT_AUTH_TOKEN="your-token"
 cargo run --example simple_register
 ```
 
+### Connection Persistence Demo
+```bash
+export HT_AUTH_TOKEN="your-token"
+export HT_GATEWAY_URL="http://127.0.0.1:8008"  # optional
+cargo run --example connection_persistence
+```
+
+Demonstrates how connections are automatically restored across application restarts.
+
+### Storage Modes
+```bash
+export HT_AUTH_TOKEN="your-token"
+export HT_GATEWAY_URL="http://127.0.0.1:8008"  # optional
+cargo run --example storage_modes
+```
+
+Shows all available storage modes: default persistence, ephemeral, custom directory, and forced fresh registration.
+
 ### Custom Gateway URL
 ```bash
 export HT_AUTH_TOKEN="your-token"
@@ -119,18 +148,36 @@ The main connection struct with integrated WireGuard transport.
 
   Connects to a Hightower gateway with a custom URL. The URL must include the scheme (http:// or https://).
 
+  **With persistence (default):**
+  - Checks for existing connection in `~/.hightower/gateway/<gateway>/`
+  - If found, restores using stored keys (same identity)
+  - If not found, generates new keypair and registers
+
   Handles everything internally:
-  - Generates WireGuard keypair
+  - Generates or restores WireGuard keypair
   - Creates transport server on 0.0.0.0:0
   - Discovers network info via STUN using actual bound port
-  - Registers with gateway
+  - Registers with gateway (or reuses existing registration)
   - Adds gateway as peer
+  - Persists connection for future use
 
   Returns a ready-to-use connection with working transport.
 
 - `async fn connect_with_auth_token(auth_token: impl Into<String>) -> Result<Self, ClientError>`
 
-  Connects using the default gateway (`http://127.0.0.1:8008`).
+  Connects using the default gateway (`http://127.0.0.1:8008`). Includes automatic persistence.
+
+- `async fn connect_ephemeral(gateway_url: impl Into<String>, auth_token: impl Into<String>) -> Result<Self, ClientError>`
+
+  Connects without persistence. Always creates fresh registration, nothing stored to disk.
+
+- `async fn connect_with_storage(gateway_url: impl Into<String>, auth_token: impl Into<String>, storage_dir: impl Into<PathBuf>) -> Result<Self, ClientError>`
+
+  Connects using a custom storage directory instead of the default location.
+
+- `async fn connect_fresh(gateway_url: impl Into<String>, auth_token: impl Into<String>) -> Result<Self, ClientError>`
+
+  Forces a fresh registration even if a stored connection exists. Deletes any existing stored connection for this gateway.
 
 - `fn node_id(&self) -> &str`
 
@@ -171,6 +218,7 @@ Error types returned by the library.
 - `InvalidResponse(String)` - Unexpected response format
 - `NetworkDiscovery(String)` - Failed to discover network info via STUN
 - `Transport(String)` - Transport creation or operation failed
+- `Storage(String)` - Storage operation failed (persistence)
 
 ## Testing
 
