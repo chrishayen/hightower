@@ -9,6 +9,7 @@ pub enum ClientError {
     InvalidResponse(String),
     NetworkDiscovery(String),
     Transport(String),
+    Storage(String),
 }
 
 impl fmt::Display for ClientError {
@@ -22,6 +23,7 @@ impl fmt::Display for ClientError {
             ClientError::InvalidResponse(msg) => write!(f, "invalid response: {}", msg),
             ClientError::NetworkDiscovery(msg) => write!(f, "network discovery failed: {}", msg),
             ClientError::Transport(msg) => write!(f, "transport error: {}", msg),
+            ClientError::Storage(msg) => write!(f, "storage error: {}", msg),
         }
     }
 }

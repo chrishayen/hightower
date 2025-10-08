@@ -1,6 +1,7 @@
 mod connection;
 mod error;
 mod ip_discovery;
+mod storage;
 mod transport;
 mod types;
 
