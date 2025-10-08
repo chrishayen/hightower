@@ -8,6 +8,7 @@ mod types;
 pub use connection::HightowerConnection;
 pub use error::ClientError;
 pub use transport::TransportServer;
+pub use types::PeerInfo;
 
 // Internal types
 pub(crate) use types::NetworkInfo;

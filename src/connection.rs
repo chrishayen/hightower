@@ -1,7 +1,7 @@
 use crate::error::ClientError;
 use crate::storage::{ConnectionStorage, StoredConnection, current_timestamp};
 use crate::transport::TransportServer;
-use crate::types::{RegistrationRequest, RegistrationResponse};
+use crate::types::{PeerInfo, RegistrationRequest, RegistrationResponse};
 use hightower_wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
 use hightower_wireguard::transport::Server;
 use reqwest::StatusCode;
@@ -19,8 +19,9 @@ pub struct HightowerConnection {
     assigned_ip: String,
     token: String,
     endpoint: String,
-    #[allow(dead_code)] // Used when constructing from stored connection
     gateway_url: String,
+    gateway_endpoint: SocketAddr,
+    gateway_public_key: PublicKey25519,
     storage: Option<ConnectionStorage>,
 }
 
@@ -256,6 +257,10 @@ impl HightowerConnection {
             }
         }
 
+        // Gateway WireGuard endpoint (hardcoded for now - could be returned by registration)
+        let gateway_endpoint: SocketAddr = "127.0.0.1:51820".parse()
+            .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
+
         Ok(Self {
             transport: TransportServer::new(server),
             node_id: registration.node_id,
@@ -263,6 +268,8 @@ impl HightowerConnection {
             token: registration.token,
             endpoint,
             gateway_url,
+            gateway_endpoint,
+            gateway_public_key,
             storage,
         })
     }
@@ -343,6 +350,10 @@ impl HightowerConnection {
             warn!(error = ?e, "Failed to update last_connected timestamp");
         }
 
+        // Gateway WireGuard endpoint (hardcoded for now - could be stored)
+        let gateway_endpoint: SocketAddr = "127.0.0.1:51820".parse()
+            .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
+
         Ok(Self {
             transport: TransportServer::new(server),
             node_id: stored.node_id,
@@ -350,6 +361,8 @@ impl HightowerConnection {
             token: stored.token,
             endpoint,
             gateway_url: stored.gateway_url,
+            gateway_endpoint,
+            gateway_public_key,
             storage: Some(storage),
         })
     }
@@ -372,6 +385,152 @@ impl HightowerConnection {
     /// Get the transport for sending/receiving data
     pub fn transport(&self) -> &TransportServer {
         &self.transport
+    }
+
+    /// Ping the gateway over WireGuard to verify connectivity
+    pub async fn ping_gateway(&self) -> Result<(), ClientError> {
+        debug!("Pinging gateway over WireGuard");
+
+        // Dial the gateway's WireGuard endpoint
+        let conn = self
+            .transport
+            .server()
+            .dial("tcp", &self.gateway_endpoint.to_string(), self.gateway_public_key)
+            .await
+            .map_err(|e| ClientError::Transport(format!("failed to dial gateway: {}", e)))?;
+
+        debug!("WireGuard connection established to gateway");
+
+        // Send HTTP GET request to /ping
+        let request = b"GET /ping HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n";
+        conn.send(request)
+            .await
+            .map_err(|e| ClientError::Transport(format!("failed to send ping request: {}", e)))?;
+
+        // Receive response
+        let mut buf = vec![0u8; 8192];
+        let n = conn
+            .recv(&mut buf)
+            .await
+            .map_err(|e| ClientError::Transport(format!("failed to receive ping response: {}", e)))?;
+
+        let response = String::from_utf8_lossy(&buf[..n]);
+
+        if response.contains("200 OK") && response.contains("Pong") {
+            debug!("Successfully pinged gateway");
+            Ok(())
+        } else {
+            Err(ClientError::GatewayError {
+                status: 500,
+                message: format!("Unexpected ping response: {}", response),
+            })
+        }
+    }
+
+    /// Get peer information from the gateway
+    ///
+    /// Accepts either a node_id (e.g., "ht-festive-penguin-abc123") or
+    /// an assigned IP (e.g., "100.64.0.5")
+    pub async fn get_peer_info(&self, node_id_or_ip: &str) -> Result<PeerInfo, ClientError> {
+        debug!(peer = %node_id_or_ip, "Fetching peer info from gateway");
+
+        // Query gateway API: GET /api/peers/{node_id_or_ip}
+        let url = format!("{}/api/peers/{}", self.gateway_url.trim_end_matches('/'), node_id_or_ip);
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if status.is_success() {
+            let peer_info: PeerInfo = response.json().await.map_err(|e| {
+                ClientError::InvalidResponse(format!("failed to parse peer info: {}", e))
+            })?;
+
+            debug!(
+                node_id = %peer_info.node_id,
+                assigned_ip = %peer_info.assigned_ip,
+                "Retrieved peer info from gateway"
+            );
+
+            Ok(peer_info)
+        } else {
+            let message = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unknown error".to_string());
+            Err(ClientError::GatewayError {
+                status: status.as_u16(),
+                message: format!("Failed to get peer info: {}", message),
+            })
+        }
+    }
+
+    /// Dial a peer by node ID or assigned IP
+    ///
+    /// This method:
+    /// 1. Fetches peer info from gateway (public key, endpoint, etc.)
+    /// 2. Adds peer to WireGuard if not already present
+    /// 3. Dials the peer over the WireGuard network
+    ///
+    /// # Arguments
+    /// * `peer` - Node ID (e.g., "ht-festive-penguin") or assigned IP (e.g., "100.64.0.5")
+    /// * `port` - Port to connect to on the peer
+    ///
+    /// # Example
+    /// ```no_run
+    /// # async fn example(conn: &hightower_client::HightowerConnection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let connection = conn.dial("ht-festive-penguin-abc123", 8080).await?;
+    /// connection.send(b"Hello, peer!").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn dial(&self, peer: &str, port: u16) -> Result<hightower_wireguard::transport::Conn, ClientError> {
+        // 1. Get peer info from gateway
+        let peer_info = self.get_peer_info(peer).await?;
+
+        // 2. Parse peer's public key
+        let peer_public_key_bytes = hex::decode(&peer_info.public_key_hex)
+            .map_err(|e| ClientError::InvalidResponse(format!("invalid peer public key hex: {}", e)))?;
+
+        let peer_public_key: PublicKey25519 = peer_public_key_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|e| ClientError::InvalidResponse(format!("invalid peer public key format: {:?}", e)))?;
+
+        // 3. Add peer to WireGuard (idempotent - safe to call multiple times)
+        self.transport
+            .server()
+            .add_peer(peer_public_key, peer_info.endpoint)
+            .await
+            .map_err(|e| ClientError::Transport(format!("failed to add peer: {}", e)))?;
+
+        debug!(
+            peer_id = %peer_info.node_id,
+            peer_ip = %peer_info.assigned_ip,
+            port = port,
+            "Added peer and dialing"
+        );
+
+        // 4. Dial using the peer's assigned IP on the WireGuard network
+        let addr = format!("{}:{}", peer_info.assigned_ip, port);
+        let conn = self
+            .transport
+            .server()
+            .dial("tcp", &addr, peer_public_key)
+            .await
+            .map_err(|e| ClientError::Transport(format!("failed to dial peer: {}", e)))?;
+
+        debug!(
+            peer_id = %peer_info.node_id,
+            addr = %addr,
+            "Successfully dialed peer"
+        );
+
+        Ok(conn)
     }
 
     /// Disconnect from the gateway and deregister

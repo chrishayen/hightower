@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInfo {
@@ -6,6 +7,20 @@ pub struct NetworkInfo {
     pub public_port: u16,
     pub local_ip: String,
     pub local_port: u16,
+}
+
+/// Information about a peer in the network
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInfo {
+    /// Node ID (e.g., "ht-festive-penguin-abc123")
+    pub node_id: String,
+    /// WireGuard public key (hex encoded)
+    pub public_key_hex: String,
+    /// Assigned IP on the WireGuard network (e.g., "100.64.0.5")
+    pub assigned_ip: String,
+    /// Public internet endpoint (optional, for NAT traversal)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<SocketAddr>,
 }
 
 #[derive(Debug, Serialize)]
