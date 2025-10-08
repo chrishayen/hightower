@@ -3,9 +3,19 @@ name = "hightower-client"
 version = "0.1.0"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
-description = "Client library for Hightower gateway registration"
+description = "Hightower client library"
 license = "MIT"
 repository = "https://github.com/chrishayen/hightower-client"
+homepage = "https://github.com/chrishayen/hightower-client"
+documentation = "https://docs.rs/hightower-client"
+readme = "README.md"
+keywords = ["wireguard", "gateway", "networking", "vpn", "hightower"]
+categories = ["network-programming", "api-bindings"]
+exclude = [
+    "target/",
+    ".git/",
+    ".gitignore",
+]
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] }
