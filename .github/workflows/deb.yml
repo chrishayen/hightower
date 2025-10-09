@@ -52,7 +52,7 @@ jobs:
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Build Debian package
-        run: cargo deb --target ${{ matrix.target }} --no-build
+        run: cargo deb --target ${{ matrix.target }} --no-build --no-strip
 
       - name: Get package name
         id: package
