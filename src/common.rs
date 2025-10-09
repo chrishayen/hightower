@@ -456,6 +456,13 @@ pub mod context {
         }
     }
 
+    pub fn initialize(kv_path: Option<&Path>) -> Result<CommonContext, ContextError> {
+        let kv = kv::initialize(kv_path).map_err(ContextError::Kv)?;
+        let context = CommonContext::new(kv);
+        bootstrap_default_user(&context).map_err(ContextError::Auth)?;
+        Ok(context)
+    }
+
     pub fn initialize_with_token_source<F>(
         kv_path: Option<&Path>,
         mut lookup: F,
@@ -463,18 +470,31 @@ pub mod context {
     where
         F: FnMut(&str) -> Result<String, VarError>,
     {
-        let token = token::fetch(|key| lookup(key)).map_err(ContextError::Token)?;
-        initialize_with_token(kv_path, token)
+        match token::fetch(|key| lookup(key)) {
+            Ok(token) => initialize_with_token(kv_path, token),
+            Err(_) => {
+                let context = initialize(kv_path)?;
+                let has_existing_token = context
+                    .kv
+                    .get_bytes(HT_AUTH_KEY)
+                    .map(|opt| opt.is_some())
+                    .unwrap_or(false);
+
+                if !has_existing_token {
+                    tracing::info!("Default HT_AUTH_KEY not provided");
+                }
+
+                Ok(context)
+            }
+        }
     }
 
     pub fn initialize_with_token(
         kv_path: Option<&Path>,
         token: String,
     ) -> Result<CommonContext, ContextError> {
-        let kv = kv::initialize(kv_path).map_err(ContextError::Kv)?;
-        let context = CommonContext::new(kv);
+        let context = initialize(kv_path)?;
         context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
-        bootstrap_default_user(&context).map_err(ContextError::Auth)?;
         Ok(context)
     }
 
@@ -532,10 +552,13 @@ pub mod context {
         }
 
         #[test]
-        fn initialize_with_token_source_reports_missing_token() {
-            let error = initialize_with_token_source(None, |_| Err(VarError::NotPresent))
-                .expect_err("missing token");
-            assert!(matches!(error, ContextError::Token(TokenError::Missing)));
+        fn initialize_with_token_source_succeeds_without_token() {
+            let temp = TempDir::new().expect("tempdir");
+            let context = initialize_with_token_source(Some(temp.path()), |_| Err(VarError::NotPresent))
+                .expect("initialize succeeds without token");
+
+            let stored = context.kv.get_bytes(HT_AUTH_KEY).expect("kv read");
+            assert!(stored.is_none(), "token should not be stored when not provided");
         }
 
         #[test]
