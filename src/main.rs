@@ -80,13 +80,13 @@ async fn main() -> Result<()> {
         }
         Commands::Run { command } => match command {
             RunCommands::Stun { bind } => {
-                commands::stun_server::run(&bind)?;
+                commands::stun_server::run_stun(&bind)?;
             }
             RunCommands::Gateway => {
-                commands::gateway::run()?;
+                commands::gateway::run_gateway()?;
             }
             RunCommands::Node => {
-                commands::node::run()?;
+                commands::node::run_node()?;
             }
         },
     }

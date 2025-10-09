@@ -1,7 +1,7 @@
 use anyhow::Result;
 use hightower_stun::server::StunServer;
 
-pub fn run(bind: &str) -> Result<()> {
+pub fn run_stun(bind: &str) -> Result<()> {
     println!("Starting STUN server on {}...", bind);
     let server = StunServer::bind(bind)?;
     println!("STUN server listening on {}", server.local_addr()?);
