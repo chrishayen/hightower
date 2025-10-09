@@ -986,7 +986,9 @@ dependencies = [
 
 [[package]]
 name = "hightower-gateway"
-version = "0.1.2"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fa34e629d7a34fd86827529374c4076733e9f694ad568f0904025169bada4ad"
 dependencies = [
  "askama",
  "axum",
@@ -1020,9 +1022,9 @@ dependencies = [
 
 [[package]]
 name = "hightower-kv"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41fc7175b3685fddc9b5aa4c60b72dfcde1a03af5cb8d13e109b320d20f082fe"
+checksum = "a5d6cb0bb29b4c018f6c3918957f99f6a1673ca10b9b87719bf50df15e37ecee"
 dependencies = [
  "aes-gcm",
  "argon2",
