@@ -179,12 +179,15 @@ jobs:
       - name: Build AUR package
         run: cargo aur
 
+      - name: Create AUR tarball
+        run: |
+          tar -czf hightower-aur.tar.gz PKGBUILD .SRCINFO
+
       - name: Get package name
         id: package
         run: |
-          PKG_FILE=$(ls *.tar.gz | head -1)
-          echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
-          echo "pkg_name=$(basename $PKG_FILE)" >> $GITHUB_OUTPUT
+          echo "pkg_file=hightower-aur.tar.gz" >> $GITHUB_OUTPUT
+          echo "pkg_name=hightower-aur.tar.gz" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
