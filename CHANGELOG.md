@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2025-10-09
+- Fixed a race condition in auth.
+
 ## [0.1.3] - 2025-10-06
 - Added efficient prefix query support via `KvEngine::get_prefix()`.
 - Implemented radix trie-based prefix index for O(prefix_length + results) lookups.
