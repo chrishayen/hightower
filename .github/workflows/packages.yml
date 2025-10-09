@@ -177,11 +177,22 @@ jobs:
         run: cargo install cargo-aur
 
       - name: Build AUR package
-        run: cargo aur
+        run: |
+          cargo aur
+          ls -la
+          find . -name "PKGBUILD" -o -name ".SRCINFO"
 
       - name: Create AUR tarball
         run: |
-          tar -czf hightower-aur.tar.gz PKGBUILD .SRCINFO
+          if [ -f PKGBUILD ]; then
+            tar -czf hightower-aur.tar.gz PKGBUILD .SRCINFO
+          elif [ -f target/cargo-aur/PKGBUILD ]; then
+            cd target/cargo-aur
+            tar -czf ../../hightower-aur.tar.gz PKGBUILD .SRCINFO
+          else
+            echo "ERROR: Cannot find PKGBUILD"
+            exit 1
+          fi
 
       - name: Get package name
         id: package
