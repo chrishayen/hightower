@@ -1,4 +1,5 @@
 .PHONY: build build-x86_64 build-arm64 build-all install test clean deb deb-arm64 rpm aur
+DEFAULT: install
 
 # Default build for native architecture
 build:
