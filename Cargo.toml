@@ -1,7 +1,14 @@
 [package]
 name = "hightower-gateway"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["Chris Hayen <chris@shotgun.dev>"]
+description = "Gateway service for the Hightower project"
+license = "MIT"
+repository = "https://github.com/chrishayen/hightower-gateway"
+readme = "README.md"
+keywords = ["gateway", "wireguard", "hightower"]
+categories = ["network-programming"]
 
 [lib]
 name = "gateway"
