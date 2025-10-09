@@ -53,7 +53,6 @@ pub(crate) fn api_address() -> String {
 }
 
 // Backward compatibility constants (deprecated)
-pub(crate) const API_ADDRESS: &str = "127.0.0.1:80";
 const NODE_REGISTRATION_PREFIX: &str = "nodes/registry";
 const NODE_TOKEN_PREFIX: &str = "nodes/tokens";
 const AUTH_HEADER: &str = "x-ht-auth";
