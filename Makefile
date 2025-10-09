@@ -1,4 +1,4 @@
-.PHONY: build build-x86_64 build-arm64 build-all install test clean deb deb-arm64
+.PHONY: build build-x86_64 build-arm64 build-all install test clean deb deb-arm64 rpm aur
 
 # Default build for native architecture
 build:
@@ -32,4 +32,12 @@ deb: build
 
 deb-arm64: build-arm64
 	cargo deb --target aarch64-unknown-linux-gnu
+
+rpm: build
+	cargo generate-rpm
+
+aur:
+	cargo aur
+	@echo "AUR package files generated in target/cargo-aur/"
+	@ls -la target/cargo-aur/
 
