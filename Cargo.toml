@@ -1,6 +1,6 @@
 [package]
 name = "hightower-gateway"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
 description = "Gateway service for the Hightower project"
@@ -22,7 +22,7 @@ path = "src/main.rs"
 clap = { version = "4.5.13", features = ["derive"] }
 ctrlc = "3"
 hightower-wireguard = { version = "0.1.5", features = ["transport"] }
-hightower-kv = "0.1.3"
+hightower-kv = "0.1.4"
 hightower-naming = "0.1.3"
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
