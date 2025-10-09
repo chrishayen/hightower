@@ -26,3 +26,7 @@ clean:
 
 run-stun:
 	cargo run --bin ht -- stun
+
+deb: build
+	cargo deb
+
