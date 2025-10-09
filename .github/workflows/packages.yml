@@ -75,6 +75,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.package.outputs.deb_file }}
+          generate_release_notes: true
           draft: false
           prerelease: false
         env:
@@ -145,6 +146,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.package.outputs.rpm_file }}
+          generate_release_notes: true
           draft: false
           prerelease: false
         env:
@@ -195,6 +197,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.package.outputs.pkg_file }}
+          generate_release_notes: true
           draft: false
           prerelease: false
         env:
