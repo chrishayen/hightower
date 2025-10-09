@@ -185,9 +185,15 @@ where
             return Ok(false);
         }
 
+        // Use microseconds since epoch for consistent versioning
+        let version = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|dur| dur.as_micros() as u64)
+            .unwrap_or_else(|_| self.id_gen.next());
+
         let command = Command::Delete {
             key: api_key_key(key_id),
-            version: self.id_gen.next(),
+            version,
             timestamp: current_timestamp(),
         };
 
@@ -272,10 +278,18 @@ where
     }
 
     fn put_value(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        // Use microseconds since epoch to ensure unique versions across instances
+        // This provides monotonically increasing versions that won't conflict
+        // between different AuthService instances
+        let version = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|dur| dur.as_micros() as u64)
+            .unwrap_or_else(|_| self.id_gen.next());
+
         let command = Command::Set {
             key,
             value,
-            version: self.id_gen.next(),
+            version,
             timestamp: current_timestamp(),
         };
         match self.engine.submit(command)? {
@@ -472,5 +486,44 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn multiple_auth_service_instances_should_not_conflict() {
+        let temp = tempdir().unwrap();
+        let mut cfg = StoreConfig::default();
+        cfg.data_dir = temp
+            .path()
+            .join("multi-auth")
+            .to_string_lossy()
+            .into_owned();
+
+        // Create the engine and first auth service
+        let engine1 = SingleNodeEngine::with_config(cfg.clone()).unwrap();
+        let auth1 = AuthService::new(
+            engine1,
+            Argon2SecretHasher::default(),
+            AesGcmEncryptor::new([0u8; 32]),
+        );
+
+        // Create user with first auth service
+        let user_record = auth1.create_user("testuser", "password123").unwrap();
+        assert_eq!(user_record.username, "testuser");
+
+        // Create a second auth service instance with a new engine pointing to the same data
+        let engine2 = SingleNodeEngine::with_config(cfg).unwrap();
+        let auth2 = AuthService::new(
+            engine2,
+            Argon2SecretHasher::default(),
+            AesGcmEncryptor::new([0u8; 32]),
+        );
+
+        // This should succeed but currently fails with stale version error
+        // because auth2 has its own IdGenerator starting from 1
+        let result = auth2.verify_password("testuser", "password123");
+
+        // This test currently fails but should pass after the fix
+        assert!(result.is_ok(), "Second auth service should be able to verify password");
+        assert!(result.unwrap(), "Password should be verified successfully");
     }
 }
