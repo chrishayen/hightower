@@ -3,8 +3,9 @@ name = "hightower-node"
 version = "0.1.0"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
-description = "Hightower node client"
+description = "Hightower node service"
 repository = "https://github.com/chrishayen/hightower-node"
+license = "MIT"
 
 [lib]
 name = "hightower_node"

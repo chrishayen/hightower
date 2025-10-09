@@ -689,6 +689,17 @@ mod tests {
 
     #[test]
     fn enable_gateway_registration_restores_previous_state() {
+        use std::sync::{Mutex, OnceLock};
+
+        fn test_env_lock() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
+
+        let _test_lock = test_env_lock().lock().expect("test env lock");
+
+        let previous = std::env::var(env::DISABLE_GATEWAY_REGISTRATION_ENV).ok();
+
         unsafe {
             std::env::set_var(env::DISABLE_GATEWAY_REGISTRATION_ENV, "1");
         }
@@ -705,8 +716,9 @@ mod tests {
             std::env::var(env::DISABLE_GATEWAY_REGISTRATION_ENV).expect("env var restored");
         assert_eq!(restored, "1");
 
-        unsafe {
-            std::env::remove_var(env::DISABLE_GATEWAY_REGISTRATION_ENV);
+        match previous {
+            Some(value) => unsafe { std::env::set_var(env::DISABLE_GATEWAY_REGISTRATION_ENV, value) },
+            None => unsafe { std::env::remove_var(env::DISABLE_GATEWAY_REGISTRATION_ENV) },
         }
     }
 }
