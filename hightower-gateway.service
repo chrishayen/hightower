@@ -1,0 +1,27 @@
+[Unit]
+Description=Hightower Gateway Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ht gateway
+Restart=on-failure
+RestartSec=5
+User=hightower
+Group=hightower
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/hightower
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hightower-gateway
+
+[Install]
+WantedBy=multi-user.target

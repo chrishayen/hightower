@@ -1,6 +1,6 @@
 [package]
 name = "hightower"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
 description = "Hightower CLI"
@@ -33,6 +33,7 @@ license-file = ["LICENSE", "4"]
 section = "net"
 priority = "optional"
 depends = "libgcc-s1"
+maintainer-scripts = "debian/"
 extended-description = """\
 Hightower is a WireGuard networking toolkit that provides utilities for \
 STUN server functionality, gateway management, and peer connections. \
@@ -42,4 +43,7 @@ assets = [
     ["target/release/ht", "usr/bin/", "755"],
     ["target/release/wgcurl", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/hightower/", "644"],
+    ["hightower-stun.service", "lib/systemd/system/", "644"],
+    ["hightower-gateway.service", "lib/systemd/system/", "644"],
+    ["hightower-node.service", "lib/systemd/system/", "644"],
 ]

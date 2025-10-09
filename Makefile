@@ -1,4 +1,4 @@
-.PHONY: build build-x86_64 build-arm64 build-all install test clean
+.PHONY: build build-x86_64 build-arm64 build-all install test clean deb deb-arm64
 
 # Default build for native architecture
 build:
@@ -29,4 +29,7 @@ run-stun:
 
 deb: build
 	cargo deb
+
+deb-arm64: build-arm64
+	cargo deb --target aarch64-unknown-linux-gnu
 

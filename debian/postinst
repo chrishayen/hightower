@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+# Create hightower system user and group if they don't exist
+if ! getent group hightower >/dev/null; then
+    addgroup --system hightower
+fi
+
+if ! getent passwd hightower >/dev/null; then
+    adduser --system --ingroup hightower --no-create-home \
+            --home /nonexistent --shell /usr/sbin/nologin \
+            --gecos "Hightower service user" hightower >/dev/null 2>&1
+fi
+
+# Create log directory
+mkdir -p /var/log/hightower
+chown hightower:hightower /var/log/hightower
+chmod 755 /var/log/hightower
+
+# Reload systemd to pick up new service files
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+exit 0
