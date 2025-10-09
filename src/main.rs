@@ -51,7 +51,11 @@ enum RunCommands {
         bind: String,
     },
     /// Run gateway server
-    Gateway,
+    Gateway {
+        /// Path to the key-value database (default: /var/lib/hightower/gateway/db)
+        #[arg(long, default_value = "/var/lib/hightower/gateway/db")]
+        kv_path: String,
+    },
     /// Run node client
     Node,
 }
@@ -82,8 +86,8 @@ async fn main() -> Result<()> {
             RunCommands::Stun { bind } => {
                 commands::stun_server::run_stun(&bind)?;
             }
-            RunCommands::Gateway => {
-                commands::gateway::run_gateway()?;
+            RunCommands::Gateway { kv_path } => {
+                commands::gateway::run_gateway(&kv_path)?;
             }
             RunCommands::Node => {
                 commands::node::run_node()?;

@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ht stun --bind 0.0.0.0:3478
+ExecStart=/usr/bin/ht run stun
 Restart=on-failure
 RestartSec=5
 User=hightower

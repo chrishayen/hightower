@@ -17,6 +17,11 @@ mkdir -p /var/log/hightower
 chown hightower:hightower /var/log/hightower
 chmod 755 /var/log/hightower
 
+# Create data directory
+mkdir -p /var/lib/hightower
+chown hightower:hightower /var/lib/hightower
+chmod 755 /var/lib/hightower
+
 # Reload systemd to pick up new service files
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload >/dev/null 2>&1 || true

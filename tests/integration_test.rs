@@ -116,3 +116,17 @@ fn test_ht_run_stun_invalid_address() {
     assert!(stderr.contains("Error") || stderr.contains("error") || stderr.contains("invalid"));
 }
 
+#[test]
+fn test_ht_run_gateway_help() {
+    let output = Command::new("cargo")
+        .args(&["run", "--bin", "ht", "--", "run", "gateway", "--help"])
+        .output()
+        .expect("Failed to execute ht run gateway");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Run gateway server"));
+    assert!(stdout.contains("--kv-path"));
+    assert!(stdout.contains("/var/lib/hightower/gateway/db"));
+}
+
