@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use hightower_stun::server::StunServer;
 
 #[derive(Parser, Debug)]
 #[command(name = "ht")]
@@ -12,7 +13,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Run STUN server
-    Stun,
+    Stun {
+        /// Address to bind to (default: 0.0.0.0:3478)
+        #[arg(short, long, default_value = "0.0.0.0:3478")]
+        bind: String,
+    },
     /// Run gateway server
     Gateway,
     /// Run node client
@@ -23,9 +28,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Stun => {
-            println!("Running STUN server...");
-            // TODO: Import and run stun command
+        Commands::Stun { bind } => {
+            println!("Starting STUN server on {}...", bind);
+            let server = StunServer::bind(&bind)?;
+            println!("STUN server listening on {}", server.local_addr()?);
+            server.run()?;
         }
         Commands::Gateway => {
             println!("Running gateway...");

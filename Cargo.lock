@@ -658,6 +658,7 @@ dependencies = [
  "anyhow",
  "clap",
  "hightower-client",
+ "hightower-stun",
  "tokio",
  "url",
 ]

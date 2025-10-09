@@ -11,3 +11,6 @@ test:
 
 clean:
 	cargo clean
+
+run-stun:
+	cargo run --bin ht -- stun
