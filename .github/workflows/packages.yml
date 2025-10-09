@@ -182,7 +182,6 @@ jobs:
       - name: Create AUR tarball
         run: |
           cd target/cargo-aur
-          ls -la
           tar -czf ../../hightower-aur.tar.gz *
 
       - name: Get package name
