@@ -9,6 +9,9 @@ use tracing::error;
 struct Cli {
     #[arg(long = "kv", value_name = "DIR", help = "Path to key-value store directory")]
     kv: Option<PathBuf>,
+
+    #[arg(long = "email", value_name = "EMAIL", help = "Email address for Let's Encrypt certificate notifications")]
+    email: Option<String>,
 }
 
 fn main() {
@@ -27,7 +30,7 @@ fn main() {
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let context = initialize_with_token_source(cli.kv.as_deref(), |key| std::env::var(key))?;
 
-    gateway::start(&context);
+    gateway::start_with_email(&context, cli.email);
 
     wait_for_ctrl_c()?;
 

@@ -1,14 +1,16 @@
+mod acme;
 mod api;
 pub mod certificates;
 pub mod client;
 mod common;
 mod ip_allocator;
 mod startup;
+mod tls;
 pub mod wireguard_api;
 
 pub use common::*;
 
-pub use api::start;
+pub use api::{start, start_with_email};
 pub use client::{
     HttpRootRegistrar, ROOT_ENDPOINT_KEY, RegistrationResult, RootRegistrar, RootRegistrationError,
     default_registrar,
@@ -86,7 +88,7 @@ pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
 }
 
 fn readiness_address() -> SocketAddr {
-    let bound_addr: SocketAddr = api::API_ADDRESS.parse().expect("valid socket address");
+    let bound_addr: SocketAddr = api::api_address().parse().expect("valid socket address");
     let loopback = match bound_addr.ip() {
         IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),

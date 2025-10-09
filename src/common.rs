@@ -121,6 +121,10 @@ pub mod context {
             pub fn get_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, KvError> {
                 self.engine.get_prefix(prefix)
             }
+
+            pub fn flush(&self) -> Result<(), KvError> {
+                self.engine.flush()
+            }
         }
 
         pub fn initialize(dir: Option<&Path>) -> Result<KvHandle, KvInitError> {
@@ -182,6 +186,7 @@ pub mod context {
                 version,
                 timestamp,
             })?;
+            engine.flush()?;
             info!("Provisioned new auth master key");
             Ok(key)
         }
@@ -415,6 +420,10 @@ pub mod context {
             Ok(results)
         }
 
+        pub fn flush(&self) -> Result<(), hightower_kv::Error> {
+            self.inner.flush()
+        }
+
         fn prefixed_key<'a>(&self, key: &'a [u8]) -> Cow<'a, [u8]> {
             match &self.prefix {
                 Some(prefix) if !prefix.is_empty() => {
@@ -495,6 +504,7 @@ pub mod context {
     ) -> Result<CommonContext, ContextError> {
         let context = initialize(kv_path)?;
         context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
+        context.kv.flush().map_err(ContextError::Auth)?;
         Ok(context)
     }
 
@@ -520,10 +530,13 @@ pub mod context {
         match context.auth.create_user(&username, &password) {
             Ok(_) => {
                 tracing::info!(username = %username, "Bootstrapped default auth user");
+                context.kv.flush()?;
+                tracing::debug!("Flushed KV store after user bootstrap");
                 Ok(())
             }
             Err(hightower_kv::Error::Conflict(_)) => {
                 tracing::debug!(username = %username, "Default auth user already exists");
+                context.kv.flush()?;
                 Ok(())
             }
             Err(err) => Err(err),

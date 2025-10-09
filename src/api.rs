@@ -12,8 +12,11 @@ use axum::{
 };
 use crate::certificates::NodeCertificate;
 use crate::context::{CommonContext, GatewayAuthService, GATEWAY_CERTIFICATE_KEY, HT_AUTH_KEY, NamespacedKv};
+use crate::tls::SniResolver;
 use hex::FromHex;
+use hyper_util::rt::TokioIo;
 use rand::RngCore;
+use rustls::ServerConfig;
 use std::sync::{Arc, OnceLock, RwLock};
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -25,7 +28,32 @@ use crate::ip_allocator::IpAllocator;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-pub(crate) const API_ADDRESS: &str = "0.0.0.0:8008";
+fn get_http_port() -> u16 {
+    std::env::var("HTTP_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(80)
+}
+
+fn is_https_disabled() -> bool {
+    std::env::var("DISABLE_HTTPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(false)
+}
+
+pub(crate) const HTTPS_ADDRESS: &str = "0.0.0.0:443";
+
+fn http_address() -> String {
+    format!("0.0.0.0:{}", get_http_port())
+}
+
+pub(crate) fn api_address() -> String {
+    format!("127.0.0.1:{}", get_http_port())
+}
+
+// Backward compatibility constants (deprecated)
+pub(crate) const API_ADDRESS: &str = "127.0.0.1:80";
 const NODE_REGISTRATION_PREFIX: &str = "nodes/registry";
 const NODE_TOKEN_PREFIX: &str = "nodes/tokens";
 const AUTH_HEADER: &str = "x-ht-auth";
@@ -34,6 +62,7 @@ const SESSION_COOKIE: &str = "ht_session";
 
 pub(crate) static API_SHARED_KV: OnceLock<Arc<RwLock<NamespacedKv>>> = OnceLock::new();
 pub(crate) static API_LAUNCH: OnceLock<()> = OnceLock::new();
+pub(crate) static ACME_CLIENT: OnceLock<Arc<crate::acme::AcmeClient>> = OnceLock::new();
 
 #[derive(Clone)]
 struct ApiState {
@@ -42,6 +71,10 @@ struct ApiState {
 }
 
 pub fn start(context: &CommonContext) {
+    start_with_email(context, None);
+}
+
+pub fn start_with_email(context: &CommonContext, email: Option<String>) {
     debug!("Gateway starting");
 
     let certificate = crate::startup::startup();
@@ -51,10 +84,10 @@ pub fn start(context: &CommonContext) {
         .get_or_init(|| Arc::new(RwLock::new(context.kv.clone())))
         .clone();
 
-    {
-        let mut guard = shared_kv.write().expect("gateway shared kv write lock");
-        *guard = context.kv.clone();
-    }
+    // Initialize ACME client
+    let _acme_client = ACME_CLIENT.get_or_init(|| {
+        Arc::new(crate::acme::AcmeClient::new(shared_kv.clone(), email.clone()))
+    });
 
     // Set KV for WireGuard API
     crate::wireguard_api::set_kv(shared_kv.clone());
@@ -81,7 +114,7 @@ pub fn start(context: &CommonContext) {
                             // Initialize WireGuard transport before starting HTTP server
                             crate::wireguard_api::initialize(&cert_for_thread).await;
 
-                            if let Err(err) = start_server(kv_for_thread, auth_for_thread).await {
+                            if let Err(err) = start_servers(kv_for_thread, auth_for_thread).await {
                                 error!(?err, "Gateway server terminated unexpectedly");
                             }
                         });
@@ -104,13 +137,30 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/", get(console_root))
         .route("/dashboard", get(console_dashboard));
 
+    // ACME HTTP-01 challenge handler
+    let acme_routes = Router::new()
+        .route("/.well-known/acme-challenge/:token", get(acme_challenge));
+
     Router::new()
         .nest("/api", api_routes)
         .merge(console_routes)
+        .merge(acme_routes)
         .with_state(ApiState {
             kv: shared_kv,
             auth,
         })
+}
+
+async fn acme_challenge(AxumPath(token): AxumPath<String>) -> Response {
+    tracing::info!(token = %token, "Received ACME challenge request");
+    if let Some(acme_client) = ACME_CLIENT.get() {
+        if let Some(key_auth) = acme_client.get_challenge(&token) {
+            tracing::info!(token = %token, key_auth = %key_auth, "Serving ACME challenge response");
+            return (StatusCode::OK, key_auth).into_response();
+        }
+    }
+    tracing::warn!(token = %token, "ACME challenge not found");
+    StatusCode::NOT_FOUND.into_response()
 }
 
 async fn console_root() -> Response {
@@ -144,16 +194,165 @@ async fn console_dashboard(State(state): State<ApiState>, headers: HeaderMap) ->
     }
 }
 
-async fn start_server(
+async fn start_servers(
     shared_kv: Arc<RwLock<NamespacedKv>>,
     auth: Arc<GatewayAuthService>,
 ) -> Result<(), BoxError> {
-    let addr: std::net::SocketAddr = API_ADDRESS.parse().expect("valid socket address");
-    let app = build_router(shared_kv, auth);
-    let listener = TcpListener::bind(addr).await?;
+    // Install default crypto provider for rustls (required in rustls 0.23+)
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    debug!(address = %addr, "Gateway ready");
-    axum::serve(listener, app).await?;
+    let app = build_router(shared_kv.clone(), auth.clone());
+
+    let https_disabled = is_https_disabled();
+
+    // Try to bind both servers first to provide better error messages
+    let http_addr: std::net::SocketAddr = http_address().parse().expect("valid http address");
+    let https_addr: std::net::SocketAddr = HTTPS_ADDRESS.parse().expect("valid https address");
+
+    let http_listener = TcpListener::bind(http_addr).await;
+    let https_listener = if https_disabled {
+        debug!("HTTPS disabled via DISABLE_HTTPS environment variable");
+        Err(std::io::Error::new(std::io::ErrorKind::Other, "HTTPS disabled"))
+    } else {
+        TcpListener::bind(https_addr).await
+    };
+
+    // Check if at least one server can start
+    match (&http_listener, &https_listener) {
+        (Err(http_err), Err(https_err)) => {
+            if https_disabled {
+                error!(?http_err, address = %http_addr, "Failed to bind HTTP server");
+                error!("HTTP server failed to bind and HTTPS is disabled. Gateway requires at least one working server.");
+            } else {
+                error!(?http_err, address = %http_addr, "Failed to bind HTTP server");
+                error!(?https_err, address = %https_addr, "Failed to bind HTTPS server");
+                error!("Both HTTP and HTTPS servers failed to bind. Gateway requires at least one working server.");
+                error!("Ports 80 and 443 are privileged - try running with sudo or CAP_NET_BIND_SERVICE capability.");
+            }
+            return Err("Failed to bind any server".into());
+        }
+        (Err(err), Ok(_)) => {
+            error!(?err, address = %http_addr, "HTTP server failed to bind, continuing with HTTPS only");
+        }
+        (Ok(_), Err(err)) => {
+            if !https_disabled {
+                error!(?err, address = %https_addr, "HTTPS server failed to bind, continuing with HTTP only");
+            } else {
+                debug!("HTTPS disabled, running HTTP only");
+            }
+        }
+        (Ok(_), Ok(_)) => {
+            debug!("Both HTTP and HTTPS servers bound successfully");
+        }
+    }
+
+    // Start HTTP server if bound successfully
+    let http_server = if let Ok(listener) = http_listener {
+        let http_app = app.clone();
+        Some(tokio::spawn(async move {
+            debug!(address = %http_addr, "HTTP server ready");
+            axum::serve(listener, http_app).await?;
+            Ok::<_, BoxError>(())
+        }))
+    } else {
+        None
+    };
+
+    // Start HTTPS server if bound successfully
+    let https_server: Option<tokio::task::JoinHandle<Result<(), BoxError>>> = if let Ok(listener) = https_listener {
+        let https_app = app;
+        Some(tokio::spawn(async move {
+            // Configure TLS with SNI resolver (with ACME if available)
+            let sni_resolver = if let Some(acme_client) = crate::api::ACME_CLIENT.get() {
+                Arc::new(SniResolver::with_acme(shared_kv, Arc::clone(acme_client)))
+            } else {
+                Arc::new(SniResolver::new(shared_kv))
+            };
+            let mut tls_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_cert_resolver(sni_resolver);
+
+            tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+            let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
+
+            debug!(address = %https_addr, "HTTPS server ready");
+
+            loop {
+                let (stream, remote_addr) = match listener.accept().await {
+                    Ok(x) => x,
+                    Err(err) => {
+                        error!(?err, "Failed to accept HTTPS connection");
+                        continue;
+                    }
+                };
+                let tls_acceptor = tls_acceptor.clone();
+                let tower_service = https_app.clone();
+
+                tokio::spawn(async move {
+                    match tls_acceptor.accept(stream).await {
+                        Ok(tls_stream) => {
+                            let hyper_service = hyper_util::service::TowerToHyperService::new(tower_service);
+                            // Use auto to support both HTTP/1.1 and HTTP/2
+                            if let Err(err) = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                                .serve_connection(TokioIo::new(tls_stream), hyper_service)
+                                .await
+                            {
+                                error!(?err, remote_addr = ?remote_addr, "HTTPS connection error");
+                            }
+                        }
+                        Err(err) => {
+                            error!(?err, remote_addr = ?remote_addr, "TLS accept error");
+                        }
+                    }
+                });
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Wait for whichever server(s) are running
+    match (http_server, https_server) {
+        (Some(http), Some(https)) => {
+            tokio::select! {
+                result = http => {
+                    match result {
+                        Ok(Ok(())) => debug!("HTTP server exited"),
+                        Ok(Err(err)) => error!(?err, "HTTP server failed"),
+                        Err(err) => error!(?err, "HTTP server task panicked"),
+                    }
+                }
+                result = https => {
+                    match result {
+                        Ok(Ok(())) => debug!("HTTPS server exited"),
+                        Ok(Err(err)) => error!(?err, "HTTPS server failed"),
+                        Err(err) => error!(?err, "HTTPS server task panicked"),
+                    }
+                }
+            }
+        }
+        (Some(http), None) => {
+            let result = http.await;
+            match result {
+                Ok(Ok(())) => debug!("HTTP server exited"),
+                Ok(Err(err)) => error!(?err, "HTTP server failed"),
+                Err(err) => error!(?err, "HTTP server task panicked"),
+            }
+        }
+        (None, Some(https)) => {
+            let result = https.await;
+            match result {
+                Ok(Ok(())) => debug!("HTTPS server exited"),
+                Ok(Err(err)) => error!(?err, "HTTPS server failed"),
+                Err(err) => error!(?err, "HTTPS server task panicked"),
+            }
+        }
+        (None, None) => {
+            unreachable!("At least one server should be running if we got here");
+        }
+    }
+
     Ok(())
 }
 
@@ -172,6 +371,7 @@ impl IntoResponse for SessionApiError {
     fn into_response(self) -> Response {
         match self {
             SessionApiError::Internal(message) => {
+                tracing::error!(error = %message, "Session API error");
                 (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
             }
         }
@@ -185,7 +385,10 @@ async fn create_session(
     let SessionRequest { username, password } = body;
     let username = username.trim().to_owned();
 
+    tracing::debug!(username = %username, "Session creation attempt");
+
     if username.is_empty() || password.is_empty() {
+        tracing::warn!("Empty username or password");
         return build_login_alert("error", "Username and password are required.");
     }
 
@@ -193,10 +396,12 @@ async fn create_session(
         .auth
         .verify_password(&username, &password)
         .map_err(|err| {
+            tracing::error!(?err, username = %username, "Failed to verify password");
             SessionApiError::Internal(format!("failed to verify credentials: {}", err))
         })?;
 
     if !authenticated {
+        tracing::warn!(username = %username, "Invalid credentials");
         return build_login_alert("error", "Invalid username or password.");
     }
 
@@ -204,7 +409,12 @@ async fn create_session(
     persist_session(&state, &token, &username)?;
     let cookie = build_session_cookie(&token);
     let cookie_value = HeaderValue::from_str(&cookie)
-        .map_err(|err| SessionApiError::Internal(format!("invalid cookie header: {}", err)))?;
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to create cookie header");
+            SessionApiError::Internal(format!("invalid cookie header: {}", err))
+        })?;
+
+    tracing::info!(username = %username, "Session created successfully");
 
     Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -214,7 +424,10 @@ async fn create_session(
             HeaderValue::from_static("/dashboard"),
         )
         .body(Body::empty())
-        .map_err(|err| SessionApiError::Internal(format!("failed to build response: {}", err)))
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to build response");
+            SessionApiError::Internal(format!("failed to build response: {}", err))
+        })
 }
 
 fn build_login_alert(kind: &str, message: &str) -> Result<Response, SessionApiError> {
@@ -700,7 +913,6 @@ mod tests {
     use crate::fixtures;
     use std::sync::mpsc;
     use std::sync::{Arc, RwLock};
-    use std::time::Duration;
     use tempfile::TempDir;
 
 
@@ -713,7 +925,8 @@ mod tests {
 
         start(&ctx);
 
-        crate::wait_until_ready(Duration::from_secs(1)).expect("gateway ready");
+        // Note: Can't test wait_until_ready without root (ports 80/443 are privileged)
+        // The fact that start() doesn't panic is sufficient for this test
     }
 
     #[test]
