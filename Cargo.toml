@@ -2,6 +2,13 @@
 name = "hightower"
 version = "0.1.0"
 edition = "2021"
+authors = ["Chris Hayen <chris@shotgun.dev>"]
+description = "Hightower CLI"
+license = "MIT"
+repository = "https://github.com/chrishayen/hightower"
+readme = "README.md"
+keywords = ["wireguard", "networking", "stun", "gateway", "peer"]
+categories = ["network-programming", "command-line-utilities"]
 
 [[bin]]
 name = "wgcurl"
@@ -18,3 +25,21 @@ clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
 url = "2.5"
+
+[package.metadata.deb]
+maintainer = "Chris Hayen <chris@shotgun.dev>"
+copyright = "2025, Chris Hayen <chris@shotgun.dev>"
+license-file = ["LICENSE", "4"]
+section = "net"
+priority = "optional"
+depends = "libgcc-s1"
+extended-description = """\
+Hightower is a WireGuard networking toolkit that provides utilities for \
+STUN server functionality, gateway management, and peer connections. \
+Includes the ht CLI tool for server management and wgcurl for fetching \
+content from WireGuard peer endpoints."""
+assets = [
+    ["target/release/ht", "usr/bin/", "755"],
+    ["target/release/wgcurl", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/hightower/", "644"],
+]
