@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ht gateway
+ExecStart=/usr/bin/ht run gateway
 Restart=on-failure
 RestartSec=5
 User=hightower
