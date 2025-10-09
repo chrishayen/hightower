@@ -42,3 +42,15 @@ assets = [
     ["hightower-gateway.service", "lib/systemd/system/", "644"],
     ["hightower-node.service", "lib/systemd/system/", "644"],
 ]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/ht", dest = "/usr/bin/ht", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/hightower/README.md", mode = "644" },
+    { source = "hightower-stun.service", dest = "/lib/systemd/system/hightower-stun.service", mode = "644" },
+    { source = "hightower-gateway.service", dest = "/lib/systemd/system/hightower-gateway.service", mode = "644" },
+    { source = "hightower-node.service", dest = "/lib/systemd/system/hightower-node.service", mode = "644" },
+]
+
+[package.metadata.aur]
+depends = ["gcc-libs"]
