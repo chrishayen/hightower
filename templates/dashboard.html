@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
-<body class="dashboard-page">
+<body>
   <nav id="side-menu" class="side-menu" aria-label="Main navigation">
     <button class="menu-toggle" aria-label="Toggle menu" aria-expanded="false">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -63,14 +63,17 @@
     </div>
   </nav>
   <main class="dashboard-main">
-    <section class="login-card dashboard-card" aria-labelledby="dashboard-heading">
-      <header>
-        <h1 id="dashboard-heading">Dashboard</h1>
-        <p>Registered nodes available to the mesh.</p>
-      </header>
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <p>Monitor and manage registered nodes in the mesh network.</p>
+    </div>
+
+    <section class="content-section" aria-labelledby="dashboard-heading">
+      <div class="section-header">
+        <h2 id="dashboard-heading">Registered Nodes</h2>
+      </div>
       <div
         id="node-list"
-        class="dashboard-body"
         hx-get="/api/dashboard/nodes"
         hx-trigger="load, every 10s"
         hx-swap="innerHTML"

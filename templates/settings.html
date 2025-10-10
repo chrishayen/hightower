@@ -9,7 +9,7 @@
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js" defer></script>
 </head>
-<body class="dashboard-page">
+<body>
   <nav id="side-menu" class="side-menu" aria-label="Main navigation">
     <button class="menu-toggle" aria-label="Toggle menu" aria-expanded="false">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -64,43 +64,45 @@
     </div>
   </nav>
   <main class="dashboard-main">
-    <section class="login-card dashboard-card" aria-labelledby="settings-heading">
-      <header>
-        <h1 id="settings-heading">Change Password</h1>
-        <p>Update your account password.</p>
-      </header>
-      <div class="dashboard-body">
-        <div id="password-alert"></div>
-        <form
-          hx-post="/api/settings/password"
-          hx-ext="json-enc"
-          hx-target="#password-alert"
-          hx-swap="innerHTML"
-        >
-          <fieldset>
-            <label for="current_password">Current Password</label>
-            <input
-              type="password"
-              id="current_password"
-              name="current_password"
-              required
-              autocomplete="current-password"
-            />
+    <div class="page-header">
+      <h1>Settings</h1>
+      <p>Manage your account settings and preferences.</p>
+    </div>
 
-            <label for="new_password">New Password</label>
-            <input
-              type="password"
-              id="new_password"
-              name="new_password"
-              required
-              autocomplete="new-password"
-              minlength="8"
-            />
-
-            <button type="submit">Change Password</button>
-          </fieldset>
-        </form>
+    <section class="content-section" aria-labelledby="settings-heading">
+      <div class="section-header">
+        <h2 id="settings-heading">Change Password</h2>
       </div>
+      <div id="password-alert"></div>
+      <form
+        hx-post="/api/settings/password"
+        hx-ext="json-enc"
+        hx-target="#password-alert"
+        hx-swap="innerHTML"
+      >
+        <fieldset>
+          <label for="current_password">Current Password</label>
+          <input
+            type="password"
+            id="current_password"
+            name="current_password"
+            required
+            autocomplete="current-password"
+          />
+
+          <label for="new_password">New Password</label>
+          <input
+            type="password"
+            id="new_password"
+            name="new_password"
+            required
+            autocomplete="new-password"
+            minlength="8"
+          />
+
+          <button type="submit">Change Password</button>
+        </fieldset>
+      </form>
     </section>
   </main>
   <script>
