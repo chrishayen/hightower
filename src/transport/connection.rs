@@ -198,10 +198,11 @@ struct SessionState {
     created_at: Instant,
     persistent_keepalive: Option<u16>,
     send_counter: u64,
+    is_initiator: bool,  // Whether we initiated this session
 }
 
 impl SessionState {
-    fn new(peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>, session: ActiveSession) -> Self {
+    fn new(peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>, session: ActiveSession, is_initiator: bool) -> Self {
         let now = Instant::now();
         Self {
             peer_public_key,
@@ -212,6 +213,7 @@ impl SessionState {
             created_at: now,
             persistent_keepalive: None,
             send_counter: 0,
+            is_initiator,
         }
     }
 
@@ -225,6 +227,11 @@ impl SessionState {
     }
 
     fn needs_rekey(&self, now: Instant) -> bool {
+        // Only the initiator is responsible for time-based rekeying (WireGuard spec)
+        if !self.is_initiator {
+            return false;
+        }
+
         if !matches!(self.state, SessionStateInner::Active { .. }) {
             return false;
         }
@@ -460,7 +467,8 @@ impl ConnectionActor {
 
         debug!(from = %from, "Sent handshake response");
 
-        self.create_session_from_response(response.sender, peer_public_key, from);
+        // We're the responder (they initiated to us)
+        self.create_session_from_response(response.sender, peer_public_key, from, false);
         self.create_incoming_stream(peer_public_key, from);
         self.enable_maintenance_if_first();
     }
@@ -473,13 +481,13 @@ impl ConnectionActor {
         Ok(())
     }
 
-    fn create_session_from_response(&mut self, session_id: u32, peer_public_key: PublicKey25519, from: SocketAddr) {
+    fn create_session_from_response(&mut self, session_id: u32, peer_public_key: PublicKey25519, from: SocketAddr, is_initiator: bool) {
         let session = match self.protocol.get_session(session_id) {
             Some(s) => s.clone(),
             None => return,
         };
 
-        let mut state = SessionState::new(peer_public_key, Some(from), session);
+        let mut state = SessionState::new(peer_public_key, Some(from), session, is_initiator);
 
         // Set keepalive if configured
         if let Some(peer) = self.protocol.peers().get(&peer_public_key) {
@@ -534,7 +542,8 @@ impl ConnectionActor {
     }
 
     fn handle_connect_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<Stream, Error>>) {
-        self.create_session_from_response(response.sender, peer_public_key, from);
+        // We're the initiator (we initiated the connection)
+        self.create_session_from_response(response.sender, peer_public_key, from, true);
 
         let stream = self.create_stream(peer_public_key, from);
         let _ = reply.send(Ok(stream));
@@ -564,8 +573,8 @@ impl ConnectionActor {
         // Remove old session
         self.sessions.remove(&old_session_id);
 
-        // Create new session with new ID
-        self.create_session_from_response(response.sender, peer_public_key, from);
+        // Create new session with new ID (we're the initiator of the rekey)
+        self.create_session_from_response(response.sender, peer_public_key, from, true);
 
         // Send queued packets with new session
         for packet_data in queued_packets {
