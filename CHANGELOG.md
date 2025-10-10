@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2025-10-10
+- Added `AuthService::change_password()` method for secure password updates.
+
 ## [0.1.4] - 2025-10-09
 - Fixed a race condition in auth.
 

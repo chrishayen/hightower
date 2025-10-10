@@ -115,6 +115,35 @@ where
         Ok(false)
     }
 
+    /// Changes a user's password after verifying the old password
+    pub fn change_password(
+        &self,
+        username: &str,
+        old_password: &str,
+        new_password: &str,
+    ) -> Result<bool> {
+        let normalized_username = normalize_username(username);
+        if normalized_username.is_empty() {
+            return Ok(false);
+        }
+
+        let mut record = match self.load_user_by_username(&normalized_username)? {
+            Some(record) => record,
+            None => return Ok(false),
+        };
+
+        let verified = self
+            .hasher
+            .verify_secret(old_password.as_bytes(), &record.password_hash)?;
+        if !verified {
+            return Ok(false);
+        }
+
+        record.password_hash = self.hasher.hash_secret(new_password.as_bytes())?;
+        self.persist_user_record(&record)?;
+        Ok(true)
+    }
+
     /// Creates a new API key for the specified user and returns the record and token
     pub fn create_api_key(
         &self,
@@ -525,5 +554,37 @@ mod tests {
         // This test currently fails but should pass after the fix
         assert!(result.is_ok(), "Second auth service should be able to verify password");
         assert!(result.unwrap(), "Password should be verified successfully");
+    }
+
+    #[test]
+    fn change_password_updates_password_hash() {
+        let (svc, _guard) = build_service("change-password", [9u8; 32]);
+        svc.create_user("user", "oldpass").unwrap();
+        assert!(svc.verify_password("user", "oldpass").unwrap());
+        assert!(svc.change_password("user", "oldpass", "newpass").unwrap());
+        assert!(!svc.verify_password("user", "oldpass").unwrap());
+        assert!(svc.verify_password("user", "newpass").unwrap());
+    }
+
+    #[test]
+    fn change_password_fails_with_wrong_old_password() {
+        let (svc, _guard) = build_service("change-wrong-old", [10u8; 32]);
+        svc.create_user("user", "correct").unwrap();
+        assert!(!svc.change_password("user", "wrong", "newpass").unwrap());
+        assert!(svc.verify_password("user", "correct").unwrap());
+    }
+
+    #[test]
+    fn change_password_fails_for_nonexistent_user() {
+        let (svc, _guard) = build_service("change-missing", [11u8; 32]);
+        assert!(!svc.change_password("missing", "old", "new").unwrap());
+    }
+
+    #[test]
+    fn change_password_normalizes_username() {
+        let (svc, _guard) = build_service("change-normalize", [12u8; 32]);
+        svc.create_user("Alice", "secret").unwrap();
+        assert!(svc.change_password("ALICE", "secret", "newsecret").unwrap());
+        assert!(svc.verify_password("alice", "newsecret").unwrap());
     }
 }
