@@ -55,6 +55,14 @@ pub(crate) struct LoginTemplate;
 pub(crate) struct DashboardTemplate;
 
 #[derive(Template)]
+#[template(path = "nodes.html")]
+pub(crate) struct NodesTemplate;
+
+#[derive(Template)]
+#[template(path = "settings.html")]
+pub(crate) struct SettingsTemplate;
+
+#[derive(Template)]
 #[template(path = "login_alert.html")]
 pub(crate) struct LoginAlertTemplate<'a> {
     pub(crate) kind: &'a str,

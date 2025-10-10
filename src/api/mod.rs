@@ -15,12 +15,13 @@ use rustls::ServerConfig;
 use std::sync::{Arc, OnceLock, RwLock};
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
+use tower_http::services::ServeDir;
 use tracing::dispatcher;
 use tracing::{debug, error};
 
 use handlers::{
-    acme_challenge, console_dashboard, console_root, create_session, dashboard_nodes,
-    deregister_node, register_node, root_health,
+    acme_challenge, console_dashboard, console_nodes, console_root, console_settings,
+    create_session, dashboard_nodes, deregister_node, delete_session, register_node, root_health,
 };
 use types::ApiState;
 
@@ -120,17 +121,27 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/session", post(create_session))
         .route("/dashboard/nodes", get(dashboard_nodes));
 
+    let logout_routes = Router::new()
+        .route("/logout", get(delete_session));
+
     let console_routes = Router::new()
         .route("/", get(console_root))
-        .route("/dashboard", get(console_dashboard));
+        .route("/dashboard", get(console_dashboard))
+        .route("/nodes", get(console_nodes))
+        .route("/settings", get(console_settings));
 
     // ACME HTTP-01 challenge handler
     let acme_routes =
         Router::new().route("/.well-known/acme-challenge/:token", get(acme_challenge));
 
+    // Static file serving
+    let static_service = ServeDir::new("static");
+
     Router::new()
         .nest("/api", api_routes)
+        .nest_service("/static", static_service)
         .merge(console_routes)
+        .merge(logout_routes)
         .merge(acme_routes)
         .with_state(ApiState {
             kv: shared_kv,

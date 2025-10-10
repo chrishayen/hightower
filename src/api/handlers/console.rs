@@ -6,7 +6,7 @@ use axum::{
 };
 use tracing::error;
 
-use super::super::types::{ApiState, DashboardTemplate, LoginTemplate};
+use super::super::types::{ApiState, DashboardTemplate, LoginTemplate, NodesTemplate, SettingsTemplate};
 use super::sessions::has_valid_session;
 
 pub(crate) async fn console_root() -> Response {
@@ -31,6 +31,48 @@ pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: He
         Ok(false) => Redirect::to("/").into_response(),
         Err(err) => {
             error!(?err, "Failed to validate session for dashboard");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to validate session",
+            )
+                .into_response()
+        }
+    }
+}
+
+pub(crate) async fn console_nodes(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+    match has_valid_session(&state, &headers) {
+        Ok(true) => match NodesTemplate.render() {
+            Ok(html) => (StatusCode::OK, Html(html)).into_response(),
+            Err(err) => {
+                error!(?err, "Failed to render nodes template");
+                (StatusCode::INTERNAL_SERVER_ERROR, "failed to render page").into_response()
+            }
+        },
+        Ok(false) => Redirect::to("/").into_response(),
+        Err(err) => {
+            error!(?err, "Failed to validate session for nodes");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to validate session",
+            )
+                .into_response()
+        }
+    }
+}
+
+pub(crate) async fn console_settings(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+    match has_valid_session(&state, &headers) {
+        Ok(true) => match SettingsTemplate.render() {
+            Ok(html) => (StatusCode::OK, Html(html)).into_response(),
+            Err(err) => {
+                error!(?err, "Failed to render settings template");
+                (StatusCode::INTERNAL_SERVER_ERROR, "failed to render page").into_response()
+            }
+        },
+        Ok(false) => Redirect::to("/").into_response(),
+        Err(err) => {
+            error!(?err, "Failed to validate session for settings");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "failed to validate session",

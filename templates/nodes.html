@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hightower · Dashboard</title>
-  <meta name="description" content="Operational view of registered nodes within Hightower.">
+  <title>Hightower · Nodes</title>
+  <meta name="description" content="Manage and configure nodes in the Hightower mesh.">
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
@@ -63,19 +63,13 @@
     </div>
   </nav>
   <main class="dashboard-main">
-    <section class="login-card dashboard-card" aria-labelledby="dashboard-heading">
+    <section class="login-card dashboard-card" aria-labelledby="nodes-heading">
       <header>
-        <h1 id="dashboard-heading">Dashboard</h1>
-        <p>Registered nodes available to the mesh.</p>
+        <h1 id="nodes-heading">Nodes</h1>
+        <p>Manage and configure mesh nodes.</p>
       </header>
-      <div
-        id="node-list"
-        class="dashboard-body"
-        hx-get="/api/dashboard/nodes"
-        hx-trigger="load, every 10s"
-        hx-swap="innerHTML"
-      >
-        <p class="dashboard-empty">Loading node registrations…</p>
+      <div class="dashboard-body">
+        <p class="dashboard-empty">Node management coming soon.</p>
       </div>
     </section>
   </main>

@@ -65,6 +65,42 @@ pub(crate) async fn create_session(
         })
 }
 
+pub(crate) async fn delete_session(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Response, SessionApiError> {
+    if let Some(token) = extract_session_token(&headers) {
+        let kv = {
+            let guard = state.kv.read().expect("gateway shared kv read lock");
+            guard.clone()
+        };
+
+        let sessions = kv.clone_with_additional_prefix(SESSION_NAMESPACE);
+        if let Err(err) = sessions.put_bytes(token.as_bytes(), b"__DELETED__") {
+            tracing::error!(?err, "Failed to delete session");
+        } else {
+            tracing::info!("Session deleted successfully");
+        }
+    }
+
+    let clear_cookie = format!("{}=; HttpOnly; Path=/; Max-Age=0", SESSION_COOKIE);
+    let cookie_value = HeaderValue::from_str(&clear_cookie)
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to create clear cookie header");
+            SessionApiError::Internal(format!("invalid cookie header: {}", err))
+        })?;
+
+    Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(SET_COOKIE, cookie_value)
+        .header(axum::http::header::LOCATION, "/")
+        .body(Body::empty())
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to build logout response");
+            SessionApiError::Internal(format!("failed to build response: {}", err))
+        })
+}
+
 fn build_login_alert(kind: &str, message: &str) -> Result<Response, SessionApiError> {
     let template = LoginAlertTemplate { kind, message };
     let markup = template.render().map_err(|err| {
@@ -121,7 +157,12 @@ fn session_exists(state: &ApiState, token: &str) -> Result<bool, hightower_kv::E
     let sessions = kv.clone_with_additional_prefix(SESSION_NAMESPACE);
     sessions
         .get_bytes(token.as_bytes())
-        .map(|value| value.is_some())
+        .map(|value| {
+            match value {
+                Some(bytes) => bytes != b"__DELETED__",
+                None => false,
+            }
+        })
 }
 
 fn extract_session_token(headers: &HeaderMap) -> Option<String> {
