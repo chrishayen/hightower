@@ -55,7 +55,7 @@ pub fn generate_random_name_with_prefix(prefix: Option<&str>, random_suffix_leng
         Some(length) if length > 0 => {
             let random_chars: String = (0..length)
                 .map(|_| {
-                    let chars = b"abcdefghijklmnopqrstuvwxyz0123456789";
+                    let chars = b"0123456789";
                     chars[rng.gen_range(0..chars.len())] as char
                 })
                 .collect();
@@ -86,11 +86,11 @@ mod tests {
     }
 
     #[test]
-    fn test_random_suffix_alphanumeric() {
+    fn test_random_suffix_numeric() {
         let name = generate_random_name(Some(5));
         let parts: Vec<&str> = name.split('-').collect();
         let suffix = parts[2];
-        assert!(suffix.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(suffix.chars().all(|c| c.is_ascii_digit()));
     }
 
     #[test]

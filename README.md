@@ -8,7 +8,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-naming = "0.1.3"
+hightower-naming = "0.1.4"
 ```
 
 ## Usage
@@ -27,12 +27,12 @@ fn main() {
     // Generate name with 5 character random suffix
     let name = generate_random_name(Some(5));
     println!("{}", name);
-    // Example output: legendary-dragon-7x9k2
+    // Example output: legendary-dragon-79642
 
     // Generate name with custom suffix length
     let name = generate_random_name(Some(10));
     println!("{}", name);
-    // Example output: legendary-dragon-a3x9z7m4k2
+    // Example output: legendary-dragon-3928574062
 }
 ```
 
@@ -50,7 +50,7 @@ fn main() {
     // Generate name with custom prefix and random suffix
     let name = generate_random_name_with_prefix(Some("app"), Some(5));
     println!("{}", name);
-    // Example output: app-legendary-dragon-7x9k2
+    // Example output: app-legendary-dragon-79642
 }
 ```
 
@@ -63,7 +63,7 @@ Generated names follow the format:
 - **Prefix**: Optional custom prefix (default: none)
 - **Adjective**: Random adjective (e.g., "alpha", "legendary", "unstoppable")
 - **Noun**: Random noun (e.g., "warrior", "titan", "phoenix")
-- **Random suffix**: Optional alphanumeric string
+- **Random suffix**: Optional numeric string
 
 ## Examples
 
@@ -77,7 +77,7 @@ cargo run --example with_prefix
 
 Example outputs:
 - `legendary-dragon` (no suffix, no prefix)
-- `legendary-dragon-a3x9z` (5 character suffix)
-- `unstoppable-titan-abc123def4` (10 character suffix)
+- `legendary-dragon-39285` (5 character suffix)
+- `unstoppable-titan-1234567890` (10 character suffix)
 - `app-supreme-phoenix` (custom prefix, no suffix)
-- `app-alpha-warrior-m7k4p` (custom prefix with 5 character suffix)
+- `app-alpha-warrior-74629` (custom prefix with 5 character suffix)
