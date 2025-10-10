@@ -7,6 +7,7 @@
   <meta name="description" content="Configure Hightower gateway settings.">
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js" defer></script>
 </head>
 <body class="dashboard-page">
   <nav id="side-menu" class="side-menu" aria-label="Main navigation">
@@ -65,11 +66,40 @@
   <main class="dashboard-main">
     <section class="login-card dashboard-card" aria-labelledby="settings-heading">
       <header>
-        <h1 id="settings-heading">Settings</h1>
-        <p>Configure gateway and mesh settings.</p>
+        <h1 id="settings-heading">Change Password</h1>
+        <p>Update your account password.</p>
       </header>
       <div class="dashboard-body">
-        <p class="dashboard-empty">Settings configuration coming soon.</p>
+        <div id="password-alert"></div>
+        <form
+          hx-post="/api/settings/password"
+          hx-ext="json-enc"
+          hx-target="#password-alert"
+          hx-swap="innerHTML"
+        >
+          <fieldset>
+            <label for="current_password">Current Password</label>
+            <input
+              type="password"
+              id="current_password"
+              name="current_password"
+              required
+              autocomplete="current-password"
+            />
+
+            <label for="new_password">New Password</label>
+            <input
+              type="password"
+              id="new_password"
+              name="new_password"
+              required
+              autocomplete="new-password"
+              minlength="8"
+            />
+
+            <button type="submit">Change Password</button>
+          </fieldset>
+        </form>
       </div>
     </section>
   </main>

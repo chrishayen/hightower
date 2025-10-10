@@ -12,4 +12,4 @@ pub(crate) use console::{console_dashboard, console_nodes, console_root, console
 pub(crate) use dashboard::dashboard_nodes;
 pub(crate) use health::root_health;
 pub(crate) use nodes::{deregister_node, register_node, registration_storage_key};
-pub(crate) use sessions::{create_session, delete_session};
+pub(crate) use sessions::{change_password, create_session, delete_session};

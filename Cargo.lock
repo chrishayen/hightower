@@ -975,9 +975,9 @@ dependencies = [
 
 [[package]]
 name = "hightower-kv"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5d6cb0bb29b4c018f6c3918957f99f6a1673ca10b9b87719bf50df15e37ecee"
+checksum = "7be663f3ae2bc1f48dfa6d9574102425ccb82b8d3aa73a05685594da473112ac"
 dependencies = [
  "aes-gcm",
  "argon2",

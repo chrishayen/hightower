@@ -20,7 +20,7 @@ use tracing::dispatcher;
 use tracing::{debug, error};
 
 use handlers::{
-    acme_challenge, console_dashboard, console_nodes, console_root, console_settings,
+    acme_challenge, change_password, console_dashboard, console_nodes, console_root, console_settings,
     create_session, dashboard_nodes, deregister_node, delete_session, generate_auth_key,
     list_auth_keys, register_node, revoke_auth_key, root_health, store_legacy_key,
 };
@@ -148,7 +148,8 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/session", post(create_session))
         .route("/dashboard/nodes", get(dashboard_nodes))
         .route("/auth/keys", post(generate_auth_key).get(list_auth_keys))
-        .route("/auth/keys/:key_id", axum::routing::delete(revoke_auth_key));
+        .route("/auth/keys/:key_id", axum::routing::delete(revoke_auth_key))
+        .route("/settings/password", post(change_password));
 
     let logout_routes = Router::new()
         .route("/logout", get(delete_session));

@@ -167,6 +167,13 @@ fieldset {
   gap: 1.25rem;
 }
 
+label {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: rgba(224, 224, 240, 0.85);
+  margin-bottom: 0.5rem;
+}
+
 input[type="text"],
 input[type="password"] {
   background: rgba(14, 14, 20, 0.85);
