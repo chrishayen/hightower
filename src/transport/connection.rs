@@ -171,6 +171,7 @@ struct ConnectionActor {
 
     // Session management
     sessions: HashMap<SessionId, SessionState>,
+    peer_to_session: HashMap<PublicKey25519, SessionId>,
     pending_handshakes: HashMap<u32, PendingHandshake>,
 
     // Stream management
@@ -193,6 +194,7 @@ struct SessionState {
     endpoint: Option<SocketAddr>,
     state: SessionStateInner,
     last_send: Instant,
+    last_recv: Instant,
     created_at: Instant,
     persistent_keepalive: Option<u16>,
     send_counter: u64,
@@ -200,12 +202,14 @@ struct SessionState {
 
 impl SessionState {
     fn new(peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>, session: ActiveSession) -> Self {
+        let now = Instant::now();
         Self {
             peer_public_key,
             endpoint,
             state: SessionStateInner::Active { session },
-            last_send: Instant::now(),
-            created_at: Instant::now(),
+            last_send: now,
+            last_recv: now,
+            created_at: now,
             persistent_keepalive: None,
             send_counter: 0,
         }
@@ -307,6 +311,7 @@ impl ConnectionActor {
             udp_socket,
             protocol,
             sessions: HashMap::new(),
+            peer_to_session: HashMap::new(),
             pending_handshakes: HashMap::new(),
             streams: HashMap::new(),
             peer_to_stream: HashMap::new(),
@@ -481,7 +486,9 @@ impl ConnectionActor {
             state.persistent_keepalive = peer.persistent_keepalive;
         }
 
-        self.sessions.insert(SessionId(session_id), state);
+        let sid = SessionId(session_id);
+        self.sessions.insert(sid, state);
+        self.peer_to_session.insert(peer_public_key, sid);
     }
 
     async fn handle_handshake_response(&mut self, data: &[u8], from: SocketAddr) {
@@ -535,24 +542,30 @@ impl ConnectionActor {
         self.enable_maintenance_if_first();
     }
 
-    async fn handle_rekey_reply(&mut self, response: &HandshakeResponse, _from: SocketAddr, old_session_id: SessionId, peer_public_key: PublicKey25519) {
+    async fn handle_rekey_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, old_session_id: SessionId, peer_public_key: PublicKey25519) {
         info!(
             session_id = old_session_id.0,
             new_session_id = response.sender,
             "Rekey completed"
         );
 
-        let session_state = match self.sessions.get_mut(&old_session_id) {
-            Some(s) => s,
+        // Get queued packets from old session
+        let queued_packets = match self.sessions.get_mut(&old_session_id) {
+            Some(old_session) => {
+                let session = match self.protocol.get_session(response.sender) {
+                    Some(s) => s.clone(),
+                    None => return,
+                };
+                old_session.complete_rekey(session)
+            }
             None => return,
         };
 
-        let session = match self.protocol.get_session(response.sender) {
-            Some(s) => s.clone(),
-            None => return,
-        };
+        // Remove old session
+        self.sessions.remove(&old_session_id);
 
-        let queued_packets = session_state.complete_rekey(session);
+        // Create new session with new ID
+        self.create_session_from_response(response.sender, peer_public_key, from);
 
         // Send queued packets with new session
         for packet_data in queued_packets {
@@ -583,8 +596,9 @@ impl ConnectionActor {
                 }
             };
 
-            // Update endpoint for roaming
+            // Update endpoint for roaming and last receive time
             session_state.endpoint = Some(from);
+            session_state.last_recv = Instant::now();
 
             let session = match session_state.get_active_session() {
                 Some(s) => s,
@@ -680,10 +694,8 @@ impl ConnectionActor {
 
         let peer_public_key = stream.peer_public_key;
 
-        // Find session ID first
-        let session_id = self.sessions.iter()
-            .find(|(_, s)| s.peer_public_key == peer_public_key)
-            .map(|(id, _)| *id)
+        // Look up session ID using our mapping
+        let session_id = *self.peer_to_session.get(&peer_public_key)
             .ok_or(Error::NoSession)?;
 
         // Now work with the specific session
@@ -776,6 +788,7 @@ impl ConnectionActor {
 
         self.send_keepalives(now).await;
         self.initiate_rekeys(now).await;
+        self.cleanup_stale_connections(now);
     }
 
     async fn send_keepalives(&mut self, now: Instant) {
@@ -871,6 +884,55 @@ impl ConnectionActor {
             peer_public_key,
             reply: HandshakeReply::Rekey(old_session_id),
         });
+    }
+
+    fn cleanup_stale_connections(&mut self, now: Instant) {
+        const SESSION_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
+
+        // Remove stale sessions
+        let mut stale_peers = Vec::new();
+        self.sessions.retain(|session_id, session_state| {
+            let last_activity = session_state.last_recv.max(session_state.last_send);
+            let age = now.duration_since(last_activity);
+
+            if age > SESSION_TIMEOUT {
+                debug!(
+                    session_id = session_id.0,
+                    peer = %hex::encode(&session_state.peer_public_key[..8]),
+                    age_secs = age.as_secs(),
+                    "Removing stale session"
+                );
+                stale_peers.push(session_state.peer_public_key);
+                false
+            } else {
+                true
+            }
+        });
+
+        // Clean up all mappings for stale peers
+        for peer_key in stale_peers {
+            // Remove session mapping
+            self.peer_to_session.remove(&peer_key);
+
+            // Remove stream and stream mapping
+            if let Some(stream_id) = self.peer_to_stream.remove(&peer_key) {
+                self.streams.remove(&stream_id);
+                debug!(
+                    stream_id = stream_id.0,
+                    peer = %hex::encode(&peer_key[..8]),
+                    "Removed stream for stale peer"
+                );
+            }
+        }
+
+        // Clean up old pending handshakes (simple count-based for now)
+        if self.pending_handshakes.len() > 100 {
+            debug!(
+                count = self.pending_handshakes.len(),
+                "Clearing excessive pending handshakes"
+            );
+            self.pending_handshakes.clear();
+        }
     }
 }
 

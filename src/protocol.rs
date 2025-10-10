@@ -196,19 +196,11 @@ impl WireGuardProtocol {
                 WireGuardError::ProtocolError("No pending initiation found".to_string())
             })?;
 
+        // Get the peer's public key from the initiator state
+        let peer_public_key = initiator.remote_static_public();
+
         // Process the response to get session keys
         let keys = initiator.process_response(msg)?;
-
-        // Find the peer we were talking to
-        let peer_public_key = self
-            .peers
-            .iter()
-            .find_map(|(key, _)| {
-                // We need to match this somehow - for now return the first peer
-                // TODO: Better way to identify which peer this response is from
-                Some(*key)
-            })
-            .ok_or_else(|| WireGuardError::ProtocolError("Cannot identify peer".to_string()))?;
 
         // Create active session
         let now = std::time::Instant::now();

@@ -168,6 +168,11 @@ impl InitiatorState {
         Ok(SessionKeys { send_key, recv_key })
     }
 
+    /// Get the remote peer's public key
+    pub fn remote_static_public(&self) -> PublicKey25519 {
+        self.remote_static_public
+    }
+
     /// Derive public key from private key
     fn derive_public_key(&self) -> Result<PublicKey25519> {
         use x25519_dalek::{PublicKey, StaticSecret};

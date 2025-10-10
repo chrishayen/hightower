@@ -30,7 +30,7 @@ thiserror = "1.0"
 byteorder = "1.5"
 
 # Optional transport layer dependencies
-tokio = { version = "1.47", features = ["net", "sync", "time"], optional = true }
+tokio = { version = "1.47", features = ["net", "sync", "time", "rt", "macros"], optional = true }
 tracing = { version = "0.1", optional = true }
 hex = { version = "0.4", optional = true }
 
