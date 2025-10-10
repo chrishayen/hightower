@@ -4,7 +4,7 @@ mod types;
 
 pub(crate) use certificates::persist_certificate;
 
-use crate::context::{CommonContext, GatewayAuthService, NamespacedKv};
+use crate::context::{CommonContext, GatewayAuthService, NamespacedKv, HT_AUTH_KEY};
 use crate::tls::SniResolver;
 use axum::{
     routing::{get, post},
@@ -21,7 +21,8 @@ use tracing::{debug, error};
 
 use handlers::{
     acme_challenge, console_dashboard, console_nodes, console_root, console_settings,
-    create_session, dashboard_nodes, deregister_node, delete_session, register_node, root_health,
+    create_session, dashboard_nodes, deregister_node, delete_session, generate_auth_key,
+    list_auth_keys, register_node, revoke_auth_key, root_health, store_legacy_key,
 };
 use types::ApiState;
 
@@ -55,6 +56,29 @@ pub(crate) static API_SHARED_KV: OnceLock<Arc<RwLock<NamespacedKv>>> = OnceLock:
 pub(crate) static API_LAUNCH: OnceLock<()> = OnceLock::new();
 pub(crate) static ACME_CLIENT: OnceLock<Arc<crate::acme::AcmeClient>> = OnceLock::new();
 
+fn migrate_legacy_auth_key(kv: &NamespacedKv) {
+    // Check if there's a legacy auth key stored
+    if let Ok(Some(legacy_bytes)) = kv.get_bytes(HT_AUTH_KEY) {
+        // Don't migrate if already migrated or if it's the migration marker
+        if legacy_bytes == b"__MIGRATED__" {
+            return;
+        }
+
+        if let Ok(legacy_key) = String::from_utf8(legacy_bytes) {
+            debug!("Migrating legacy HT_AUTH_KEY to new auth key system");
+
+            // Store as new format with key_id "default"
+            if let Err(err) = store_legacy_key(kv, &legacy_key) {
+                error!(?err, "Failed to migrate legacy auth key");
+            } else {
+                // Keep the legacy key in place for client-side reads (nodes use it to authenticate)
+                // Only server-side validation now uses the new auth/keys location
+                debug!("Successfully migrated legacy auth key to new system while keeping legacy location for client compatibility");
+            }
+        }
+    }
+}
+
 pub fn start(context: &CommonContext) {
     start_with_email(context, None);
 }
@@ -68,6 +92,9 @@ pub fn start_with_email(context: &CommonContext, email: Option<String>) {
     let shared_kv = API_SHARED_KV
         .get_or_init(|| Arc::new(RwLock::new(context.kv.clone())))
         .clone();
+
+    // Migrate legacy HT_AUTH_KEY to new auth key system
+    migrate_legacy_auth_key(&context.kv);
 
     // Initialize ACME client
     let _acme_client = ACME_CLIENT.get_or_init(|| {
@@ -119,7 +146,9 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/nodes", post(register_node))
         .route("/nodes/:token", axum::routing::delete(deregister_node))
         .route("/session", post(create_session))
-        .route("/dashboard/nodes", get(dashboard_nodes));
+        .route("/dashboard/nodes", get(dashboard_nodes))
+        .route("/auth/keys", post(generate_auth_key).get(list_auth_keys))
+        .route("/auth/keys/:key_id", axum::routing::delete(revoke_auth_key));
 
     let logout_routes = Router::new()
         .route("/logout", get(delete_session));
@@ -348,7 +377,9 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
+        // Store in both old and new locations (simulating what migration does)
         context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
 
         let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);

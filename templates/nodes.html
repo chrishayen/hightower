@@ -65,14 +65,111 @@
   <main class="dashboard-main">
     <section class="login-card dashboard-card" aria-labelledby="nodes-heading">
       <header>
-        <h1 id="nodes-heading">Nodes</h1>
-        <p>Manage and configure mesh nodes.</p>
+        <h1 id="nodes-heading">Registered Nodes</h1>
+        <p>Nodes currently connected to the mesh.</p>
+      </header>
+      <div
+        id="node-list"
+        class="dashboard-body"
+        hx-get="/api/dashboard/nodes"
+        hx-trigger="load, every 10s"
+        hx-swap="innerHTML"
+      >
+        <p class="dashboard-empty">Loading nodes…</p>
+      </div>
+    </section>
+
+    <section class="login-card dashboard-card" aria-labelledby="auth-keys-heading" style="margin-top: 2rem;">
+      <header>
+        <h1 id="auth-keys-heading">Auth Keys</h1>
+        <p>Generate and manage authentication keys for node registration.</p>
       </header>
       <div class="dashboard-body">
-        <p class="dashboard-empty">Node management coming soon.</p>
+        <button
+          id="generate-key-btn"
+          type="button"
+          class="generate-key-btn"
+          hx-post="/api/auth/keys"
+          hx-swap="none"
+        >
+          Generate New Key
+        </button>
+
+        <div id="new-key-display" class="new-key-display" hidden>
+          <div class="alert alert-warning">
+            <strong>Save this key securely!</strong> It will only be shown once.
+          </div>
+          <div class="key-display">
+            <code id="new-key-value"></code>
+            <button type="button" class="copy-btn" onclick="copyKey()">Copy</button>
+          </div>
+        </div>
+
+        <div
+          id="keys-list"
+          hx-get="/api/auth/keys"
+          hx-trigger="load, keyGenerated from:body"
+          hx-swap="innerHTML"
+        >
+          <p class="dashboard-empty">Loading keys…</p>
+        </div>
       </div>
     </section>
   </main>
+  <script>
+  (function() {
+    const menu = document.getElementById('side-menu');
+    const toggle = document.querySelector('.menu-toggle');
+    const body = document.body;
+
+    const isExpanded = localStorage.getItem('menuExpanded') === 'true';
+    if (isExpanded) {
+      menu.classList.add('expanded');
+      body.classList.add('menu-expanded');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+
+    toggle.addEventListener('click', () => {
+      const nowExpanded = !menu.classList.contains('expanded');
+      menu.classList.toggle('expanded');
+      body.classList.toggle('menu-expanded');
+      toggle.setAttribute('aria-expanded', nowExpanded);
+      localStorage.setItem('menuExpanded', nowExpanded);
+    });
+
+    const currentPath = window.location.pathname;
+    document.querySelectorAll('.menu-item').forEach(item => {
+      const page = item.getAttribute('data-page');
+      if ((page === 'dashboard' && currentPath === '/dashboard') ||
+          (page === 'nodes' && currentPath === '/nodes') ||
+          (page === 'settings' && currentPath === '/settings')) {
+        item.classList.add('active');
+      }
+    });
+
+    // Handle auth key generation
+    document.body.addEventListener('htmx:afterRequest', (event) => {
+      if (event.detail.pathInfo.requestPath === '/api/auth/keys' && event.detail.xhr.status === 200) {
+        const response = JSON.parse(event.detail.xhr.responseText);
+        document.getElementById('new-key-value').textContent = response.key;
+        document.getElementById('new-key-display').hidden = false;
+        document.body.dispatchEvent(new CustomEvent('keyGenerated'));
+      }
+    });
+  })();
+
+  function copyKey() {
+    const keyText = document.getElementById('new-key-value').textContent;
+    navigator.clipboard.writeText(keyText).then(() => {
+      const btn = event.target;
+      const originalText = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 2000);
+    });
+  }
+  </script>
   <script>
   (function() {
     const menu = document.getElementById('side-menu');

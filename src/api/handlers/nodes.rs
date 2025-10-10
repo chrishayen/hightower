@@ -4,10 +4,9 @@ use axum::{
 };
 use hex::FromHex;
 use rand::RngCore;
-use subtle::ConstantTimeEq;
 use tracing::debug;
 
-use crate::context::{HT_AUTH_KEY, NamespacedKv};
+use crate::context::NamespacedKv;
 use crate::ip_allocator::IpAllocator;
 use super::super::certificates::load_gateway_public_key;
 use super::super::types::{
@@ -130,15 +129,10 @@ fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<(), RootApiEr
         .and_then(|value| value.to_str().ok())
         .ok_or(RootApiError::Unauthorized)?;
 
-    let stored = kv
-        .get_bytes(HT_AUTH_KEY)
-        .map_err(|err| RootApiError::Internal(format!("failed to read auth key: {}", err)))?
-        .ok_or(RootApiError::MissingAuthKey)?;
+    let is_valid_key = super::auth_keys::validate_auth_key(kv, provided)
+        .map_err(|err| RootApiError::Internal(format!("failed to validate auth key: {}", err)))?;
 
-    let stored = String::from_utf8(stored)
-        .map_err(|_| RootApiError::Internal("stored auth key is not valid UTF-8".into()))?;
-
-    if provided.as_bytes().ct_eq(stored.as_bytes()).into() {
+    if is_valid_key {
         Ok(())
     } else {
         Err(RootApiError::Unauthorized)
@@ -192,8 +186,9 @@ fn generate_node_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, HT_AUTH_KEY, initialize_kv};
+    use crate::context::{CommonContext, initialize_kv};
     use crate::api::certificates::persist_certificate;
+    use crate::api::handlers::auth_keys::store_legacy_key;
     use axum::http::HeaderValue;
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
@@ -203,7 +198,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
-        context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
 
         let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
@@ -259,7 +254,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
-        context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
 
         let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);
@@ -290,7 +285,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
-        context.kv.put_secret(HT_AUTH_KEY, b"super-secret");
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
 
         let certificate = crate::startup::startup();
         persist_certificate(&context, &certificate);

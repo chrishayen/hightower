@@ -75,6 +75,12 @@ pub(crate) struct NodesTableTemplate<'a> {
     pub(crate) nodes: &'a [NodeRegistrationRequest],
 }
 
+#[derive(Template)]
+#[template(path = "auth_keys_list.html")]
+pub(crate) struct AuthKeysListTemplate<'a> {
+    pub(crate) keys: &'a [crate::api::handlers::auth_keys::AuthKeyListItem],
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct SessionRequest {
     pub(crate) username: String,
