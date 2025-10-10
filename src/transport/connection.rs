@@ -236,7 +236,7 @@ impl SessionState {
         }
     }
 
-    fn start_rekey(&mut self, handshake_id: u32) -> Result<(), Error> {
+    fn start_rekey(&mut self) -> Result<(), Error> {
         let session = match &self.state {
             SessionStateInner::Active { session } => session.clone(),
             _ => return Err(Error::AlreadyRekeying),
@@ -244,9 +244,7 @@ impl SessionState {
 
         self.state = SessionStateInner::Rekeying {
             old_session: session,
-            new_handshake_id: handshake_id,
             queue: Vec::new(),
-            started_at: Instant::now(),
         };
 
         Ok(())
@@ -282,9 +280,7 @@ enum SessionStateInner {
     },
     Rekeying {
         old_session: ActiveSession,
-        new_handshake_id: u32,
         queue: Vec<Vec<u8>>,
-        started_at: Instant,
     },
 }
 
@@ -300,7 +296,6 @@ enum HandshakeReply {
 
 struct StreamState {
     peer_public_key: PublicKey25519,
-    peer_addr: SocketAddr,
     recv_tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
@@ -630,15 +625,6 @@ impl ConnectionActor {
         }
     }
 
-    fn decrypt_transport(&self, transport: &TransportData, session: &ActiveSession) -> Result<Vec<u8>, Error> {
-        crate::crypto::aead_decrypt(
-            &session.keys.recv_key,
-            transport.counter,
-            &transport.packet,
-            &[],
-        ).map_err(|_| Error::DecryptionFailed)
-    }
-
     fn route_to_stream(&self, peer_public_key: &PublicKey25519, data: Vec<u8>) {
         let stream_id = match self.peer_to_stream.get(peer_public_key) {
             Some(id) => id,
@@ -729,22 +715,6 @@ impl ConnectionActor {
         self.send_transport(session_id.0, counter, encrypted, endpoint).await
     }
 
-    fn encrypt_data(&self, data: &[u8], session: &ActiveSession, counter: u64) -> Result<Vec<u8>, Error> {
-        crate::crypto::aead_encrypt(
-            &session.keys.send_key,
-            counter,
-            data,
-            &[],
-        ).map_err(|_| Error::EncryptionFailed)
-    }
-
-    fn find_session_id(&self, peer_public_key: PublicKey25519) -> Result<u32, Error> {
-        self.sessions.iter()
-            .find(|(_, s)| s.peer_public_key == peer_public_key)
-            .map(|(id, _)| id.0)
-            .ok_or(Error::NoSession)
-    }
-
     async fn send_transport(&self, session_id: u32, counter: u64, encrypted: Vec<u8>, to: SocketAddr) -> Result<(), Error> {
         let mut transport = TransportData::new();
         transport.receiver = session_id;
@@ -765,7 +735,6 @@ impl ConnectionActor {
 
         self.streams.insert(stream_id, StreamState {
             peer_public_key,
-            peer_addr,
             recv_tx,
         });
 
@@ -893,7 +862,7 @@ impl ConnectionActor {
             None => return,
         };
 
-        if let Err(e) = session_state.start_rekey(handshake_id) {
+        if let Err(e) = session_state.start_rekey() {
             error!(error = ?e, "Failed to start rekey");
             return;
         }
