@@ -23,7 +23,7 @@ clap = { version = "4.5.13", features = ["derive"] }
 ctrlc = "3"
 hightower-wireguard = { version = "0.1.5", features = ["transport"] }
 hightower-kv = "0.1.5"
-hightower-naming = "0.1.3"
+hightower-naming = "0.1.4"
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 hyper = { version = "1.7", features = ["server", "http1"] }

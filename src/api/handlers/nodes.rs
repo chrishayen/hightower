@@ -179,7 +179,7 @@ fn generate_registration_token() -> String {
 
 fn generate_node_name() -> String {
     const PREFIX: &str = "ht";
-    const SUFFIX_LEN: usize = 5;
+    const SUFFIX_LEN: usize = 4;
     hightower_naming::generate_random_name_with_prefix(Some(PREFIX), Some(SUFFIX_LEN))
 }
 
