@@ -154,7 +154,7 @@ With the `transport` feature enabled, you can use the high-level UDP-based trans
 
 ```rust
 use hightower_wireguard::crypto::dh_generate;
-use hightower_wireguard::transport::Server;
+use hightower_wireguard::connection::Server;
 
 #[tokio::main]
 async fn main() {

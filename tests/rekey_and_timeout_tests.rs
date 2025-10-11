@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod rekey_and_timeout_tests {
     use hightower_wireguard::crypto::dh_generate;
-    use hightower_wireguard::transport::Connection;
+    use hightower_wireguard::connection::Connection;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 
