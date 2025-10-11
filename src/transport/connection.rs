@@ -298,6 +298,7 @@ enum SessionStateInner {
 struct PendingHandshake {
     peer_public_key: PublicKey25519,
     reply: HandshakeReply,
+    created_at: Instant,
 }
 
 enum HandshakeReply {
@@ -378,6 +379,7 @@ impl ConnectionActor {
                 let pending = PendingHandshake {
                     peer_public_key,
                     reply: HandshakeReply::Connect(reply),
+                    created_at: Instant::now(),
                 };
                 self.pending_handshakes.insert(handshake_id, pending);
             }
@@ -468,7 +470,10 @@ impl ConnectionActor {
         debug!(from = %from, "Sent handshake response");
 
         // We're the responder (they initiated to us)
-        self.create_session_from_response(response.sender, peer_public_key, from, false);
+        if !self.create_session_from_response(response.sender, peer_public_key, from, false) {
+            error!(from = %from, "Failed to create session (possible ID collision)");
+            return;
+        }
         self.create_incoming_stream(peer_public_key, from);
         self.enable_maintenance_if_first();
     }
@@ -481,11 +486,24 @@ impl ConnectionActor {
         Ok(())
     }
 
-    fn create_session_from_response(&mut self, session_id: u32, peer_public_key: PublicKey25519, from: SocketAddr, is_initiator: bool) {
+    fn create_session_from_response(&mut self, session_id: u32, peer_public_key: PublicKey25519, from: SocketAddr, is_initiator: bool) -> bool {
         let session = match self.protocol.get_session(session_id) {
             Some(s) => s.clone(),
-            None => return,
+            None => return false,
         };
+
+        let sid = SessionId(session_id);
+
+        // Check for session ID collision
+        if self.sessions.contains_key(&sid) {
+            error!(
+                session_id = session_id,
+                peer = %hex::encode(&peer_public_key[..8]),
+                "Session ID collision detected! Rejecting new session"
+            );
+            // TODO: In production, might want to force the old session to rekey
+            return false;
+        }
 
         let mut state = SessionState::new(peer_public_key, Some(from), session, is_initiator);
 
@@ -494,9 +512,9 @@ impl ConnectionActor {
             state.persistent_keepalive = peer.persistent_keepalive;
         }
 
-        let sid = SessionId(session_id);
         self.sessions.insert(sid, state);
         self.peer_to_session.insert(peer_public_key, sid);
+        true
     }
 
     async fn handle_handshake_response(&mut self, data: &[u8], from: SocketAddr) {
@@ -543,7 +561,10 @@ impl ConnectionActor {
 
     fn handle_connect_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<Stream, Error>>) {
         // We're the initiator (we initiated the connection)
-        self.create_session_from_response(response.sender, peer_public_key, from, true);
+        if !self.create_session_from_response(response.sender, peer_public_key, from, true) {
+            let _ = reply.send(Err(Error::HandshakeFailed("Session ID collision".to_string())));
+            return;
+        }
 
         let stream = self.create_stream(peer_public_key, from);
         let _ = reply.send(Ok(stream));
@@ -574,7 +595,15 @@ impl ConnectionActor {
         self.sessions.remove(&old_session_id);
 
         // Create new session with new ID (we're the initiator of the rekey)
-        self.create_session_from_response(response.sender, peer_public_key, from, true);
+        if !self.create_session_from_response(response.sender, peer_public_key, from, true) {
+            error!(
+                old_session_id = old_session_id.0,
+                new_session_id = response.sender,
+                "Failed to create new session after rekey (possible ID collision)"
+            );
+            // Session is lost, stream will error on next operation
+            return;
+        }
 
         // Send queued packets with new session
         for packet_data in queued_packets {
@@ -594,6 +623,8 @@ impl ConnectionActor {
         };
 
         let session_id = SessionId(transport.receiver);
+        let counter = transport.counter;
+        let receiver_id = transport.receiver;
 
         // Process in a block to avoid borrow issues
         let (peer_public_key, plaintext, should_queue) = {
@@ -627,16 +658,29 @@ impl ConnectionActor {
                 }
             };
 
-            if plaintext.is_empty() {
-                debug!(from = %from, "Received keep-alive");
-                return;
-            }
-
             let should_queue = matches!(session_state.state, SessionStateInner::Rekeying { .. });
             let peer_public_key = session_state.peer_public_key;
 
             (peer_public_key, plaintext, should_queue)
         };
+
+        // Check replay protection after successful authentication (per WireGuard spec)
+        if let Err(e) = self.protocol.check_replay(receiver_id, counter) {
+            error!(
+                from = %from,
+                session_id = receiver_id,
+                counter = counter,
+                "Replay protection rejected packet: {:?}",
+                e
+            );
+            return;
+        }
+
+        // Handle keepalive
+        if plaintext.is_empty() {
+            debug!(from = %from, "Received keep-alive");
+            return;
+        }
 
         // Queue or route after releasing the borrow
         if should_queue {
@@ -798,6 +842,9 @@ impl ConnectionActor {
         self.send_keepalives(now).await;
         self.initiate_rekeys(now).await;
         self.cleanup_stale_connections(now);
+
+        // Clean up protocol layer sessions to prevent memory leak
+        self.protocol.cleanup();
     }
 
     async fn send_keepalives(&mut self, now: Instant) {
@@ -892,6 +939,7 @@ impl ConnectionActor {
         self.pending_handshakes.insert(handshake_id, PendingHandshake {
             peer_public_key,
             reply: HandshakeReply::Rekey(old_session_id),
+            created_at: Instant::now(),
         });
     }
 
@@ -934,13 +982,30 @@ impl ConnectionActor {
             }
         }
 
-        // Clean up old pending handshakes (simple count-based for now)
-        if self.pending_handshakes.len() > 100 {
+        // Clean up expired pending handshakes (30-second timeout)
+        const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+        let initial_count = self.pending_handshakes.len();
+
+        self.pending_handshakes.retain(|handshake_id, pending| {
+            let age = now.duration_since(pending.created_at);
+            if age > HANDSHAKE_TIMEOUT {
+                debug!(
+                    handshake_id = handshake_id,
+                    age_secs = age.as_secs(),
+                    "Removing expired pending handshake"
+                );
+                false
+            } else {
+                true
+            }
+        });
+
+        if initial_count > 0 && self.pending_handshakes.len() < initial_count {
             debug!(
-                count = self.pending_handshakes.len(),
-                "Clearing excessive pending handshakes"
+                removed = initial_count - self.pending_handshakes.len(),
+                remaining = self.pending_handshakes.len(),
+                "Cleaned up expired pending handshakes"
             );
-            self.pending_handshakes.clear();
         }
     }
 }
