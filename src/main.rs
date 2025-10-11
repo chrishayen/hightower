@@ -1,6 +1,6 @@
 use clap::Parser;
-use gateway::context::initialize_with_token_source;
-use gateway::logging;
+use hightower_gateway::context::initialize_with_token_source;
+use hightower_gateway::logging;
 use std::path::PathBuf;
 use tracing::error;
 
@@ -30,7 +30,7 @@ fn main() {
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let context = initialize_with_token_source(cli.kv.as_deref(), |key| std::env::var(key))?;
 
-    gateway::start_with_email(&context, cli.email);
+    hightower_gateway::start_with_email(&context, cli.email);
 
     wait_for_ctrl_c()?;
 

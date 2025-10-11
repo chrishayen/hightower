@@ -1,6 +1,6 @@
 [package]
 name = "hightower-gateway"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
 description = "Gateway service for the Hightower project"
@@ -11,7 +11,6 @@ keywords = ["gateway", "wireguard", "hightower"]
 categories = ["network-programming"]
 
 [lib]
-name = "gateway"
 path = "src/lib.rs"
 
 [[bin]]

@@ -29,11 +29,6 @@ pub struct GenerateKeyResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ListKeysResponse {
-    pub keys: Vec<AuthKeyListItem>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct AuthKeyListItem {
     pub key_id: String,
     pub created_at: i64,

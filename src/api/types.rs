@@ -106,7 +106,6 @@ impl IntoResponse for SessionApiError {
 #[derive(Debug)]
 pub(crate) enum RootApiError {
     Unauthorized,
-    MissingAuthKey,
     InvalidPublicKey,
     Storage(String),
     Internal(String),
@@ -115,7 +114,7 @@ pub(crate) enum RootApiError {
 impl IntoResponse for RootApiError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            RootApiError::Unauthorized | RootApiError::MissingAuthKey => {
+            RootApiError::Unauthorized => {
                 StatusCode::UNAUTHORIZED.into_response()
             }
             RootApiError::InvalidPublicKey => {
