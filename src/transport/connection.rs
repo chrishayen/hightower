@@ -183,6 +183,18 @@ impl Connection {
         reply_rx.await.map_err(|_| Error::ActorShutdown)?
     }
 
+    /// Disconnect from a peer and clean up associated session and stream.
+    pub async fn disconnect(&self, peer_public_key: PublicKey25519) -> Result<(), Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        self.send_command(Command::Disconnect {
+            peer_public_key,
+            reply: reply_tx,
+        })?;
+
+        reply_rx.await.map_err(|_| Error::ActorShutdown)?
+    }
+
     /// Get the local address this connection is bound to.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
@@ -210,6 +222,19 @@ impl Stream {
         let cmd = Command::SendData {
             stream_id: self.id,
             data: data.to_vec(),
+            reply: reply_tx,
+        };
+
+        self.cmd_tx.send(cmd).map_err(|_| Error::ActorShutdown)?;
+        reply_rx.await.map_err(|_| Error::ActorShutdown)?
+    }
+
+    /// Close the stream and clean up the associated session.
+    pub async fn close(&self) -> Result<(), Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        let cmd = Command::CloseStream {
+            stream_id: self.id,
             reply: reply_tx,
         };
 
@@ -259,6 +284,14 @@ enum Command {
     SendData {
         stream_id: StreamId,
         data: Vec<u8>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    CloseStream {
+        stream_id: StreamId,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    Disconnect {
+        peer_public_key: PublicKey25519,
         reply: oneshot::Sender<Result<(), Error>>,
     },
 }
@@ -470,6 +503,12 @@ impl ConnectionActor {
             Command::SendData { stream_id, data, reply } => {
                 self.handle_send_data(stream_id, data, reply).await;
             }
+            Command::CloseStream { stream_id, reply } => {
+                self.handle_close_stream(stream_id, reply);
+            }
+            Command::Disconnect { peer_public_key, reply } => {
+                self.handle_disconnect(peer_public_key, reply);
+            }
         }
     }
 
@@ -512,6 +551,42 @@ impl ConnectionActor {
     async fn handle_send_data(&mut self, stream_id: StreamId, data: Vec<u8>, reply: oneshot::Sender<Result<(), Error>>) {
         let result = self.send_data(stream_id, data).await;
         let _ = reply.send(result);
+    }
+
+    fn handle_close_stream(&mut self, stream_id: StreamId, reply: oneshot::Sender<Result<(), Error>>) {
+        let stream = match self.streams.get(&stream_id) {
+            Some(s) => s,
+            None => {
+                let _ = reply.send(Err(Error::ConnectionClosed));
+                return;
+            }
+        };
+
+        let peer_public_key = stream.peer_public_key;
+        self.disconnect_peer(&peer_public_key);
+        let _ = reply.send(Ok(()));
+    }
+
+    fn handle_disconnect(&mut self, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<(), Error>>) {
+        self.disconnect_peer(&peer_public_key);
+        let _ = reply.send(Ok(()));
+    }
+
+    fn disconnect_peer(&mut self, peer_public_key: &PublicKey25519) {
+        // Remove peer-to-stream mapping and stream
+        if let Some(stream_id) = self.peer_to_stream.remove(peer_public_key) {
+            self.streams.remove(&stream_id);
+        }
+
+        // Remove session and peer-to-session mapping
+        if let Some(session_id) = self.peer_to_session.remove(peer_public_key) {
+            self.sessions.remove(&session_id);
+            debug!(
+                session_id = session_id.0,
+                peer = %hex::encode(&peer_public_key[..8]),
+                "Disconnected peer and removed session"
+            );
+        }
     }
 
     async fn handle_packet(&mut self, data: &[u8], from: SocketAddr) {
@@ -609,6 +684,16 @@ impl ConnectionActor {
                 session_id, hex::encode(&peer_public_key[..8]));
             // TODO: In production, might want to force the old session to rekey
             return false;
+        }
+
+        // Remove old session for this peer if it exists (handles reconnects)
+        if let Some(old_session_id) = self.peer_to_session.get(&peer_public_key) {
+            if *old_session_id != sid {
+                debug_session!(is_initiator,
+                    "Replacing old session for peer: old_session_id={}, new_session_id={}",
+                    old_session_id.0, session_id);
+                self.sessions.remove(old_session_id);
+            }
         }
 
         let mut state = SessionState::new(peer_public_key, Some(from), session, is_initiator);
@@ -777,9 +862,9 @@ impl ConnectionActor {
         if plaintext.is_empty() {
             // Get session role for logging
             if let Some(session_state) = self.sessions.get(&session_id) {
-                debug_session!(session_state.is_initiator, "Received keep-alive from {}", from);
+                debug_session!(session_state.is_initiator, "Received keepalive response from {}, session_id={}", from, session_id.0);
             } else {
-                debug!("Received keep-alive from {} (session already removed)", from);
+                debug!("Received keepalive from {} (session already removed), session_id={}", from, session_id.0);
             }
             return;
         }
@@ -1049,8 +1134,8 @@ impl ConnectionActor {
         // Remove stale sessions
         let mut stale_peers = Vec::new();
         self.sessions.retain(|session_id, session_state| {
-            let last_activity = session_state.last_recv.max(session_state.last_send);
-            let age = now.duration_since(last_activity);
+            // Only check last_recv - sending keepalives shouldn't keep a dead session alive
+            let age = now.duration_since(session_state.last_recv);
 
             if age > session_timeout {
                 debug!(
