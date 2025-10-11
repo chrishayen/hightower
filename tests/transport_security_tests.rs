@@ -81,18 +81,35 @@ mod transport_security_tests {
     }
 
     #[tokio::test]
-    #[ignore] // This test takes 3+ minutes to run
     async fn test_automatic_rekey() {
-        // Test that sessions rekey automatically after REKEY_AFTER_TIME (120 seconds)
+        use hightower_wireguard::transport::TimeoutConfig;
+        use std::time::Duration;
+
+        // Test that sessions rekey automatically after REKEY_AFTER_TIME
+        // Using short timeouts for testing (5 seconds instead of 120)
+        let timeouts = TimeoutConfig {
+            rekey_after: Duration::from_secs(5),
+            reject_after: Duration::from_secs(10),
+            session_timeout: Duration::from_secs(15),
+        };
+
         let (alice_private, alice_public) = dh_generate();
         let (bob_private, bob_public) = dh_generate();
 
-        let alice = Connection::new("127.0.0.1:0".parse().unwrap(), alice_private)
-            .await
-            .unwrap();
-        let bob = Connection::new("127.0.0.1:0".parse().unwrap(), bob_private)
-            .await
-            .unwrap();
+        let alice = hightower_wireguard::transport::Connection::with_timeouts(
+            "127.0.0.1:0".parse().unwrap(),
+            alice_private,
+            timeouts,
+        )
+        .await
+        .unwrap();
+        let bob = hightower_wireguard::transport::Connection::with_timeouts(
+            "127.0.0.1:0".parse().unwrap(),
+            bob_private,
+            timeouts,
+        )
+        .await
+        .unwrap();
 
         let alice_addr = alice.local_addr();
         let bob_addr = bob.local_addr();
@@ -108,28 +125,46 @@ mod transport_security_tests {
         alice_stream.send(b"before rekey").await.unwrap();
         assert_eq!(bob_stream.recv().await.unwrap(), b"before rekey");
 
-        // Wait for rekey to happen (120 seconds + some buffer)
-        println!("Waiting for automatic rekey (this takes ~2 minutes)...");
-        sleep(Duration::from_secs(125)).await;
+        // Wait for rekey to happen (5 seconds + buffer for maintenance detection and handshake)
+        sleep(Duration::from_secs(10)).await;
 
         // Send message after rekey - should work with new session
         alice_stream.send(b"after rekey").await.unwrap();
-        assert_eq!(bob_stream.recv().await.unwrap(), b"after rekey");
+        let result = timeout(Duration::from_secs(2), bob_stream.recv()).await;
+        assert!(result.is_ok(), "Failed to receive message after rekey");
+        assert_eq!(result.unwrap().unwrap(), b"after rekey");
     }
 
     #[tokio::test]
-    #[ignore] // This test takes 3+ minutes to run
     async fn test_session_timeout() {
-        // Test that idle sessions are cleaned up after 180 seconds
+        use hightower_wireguard::transport::TimeoutConfig;
+        use std::time::Duration;
+
+        // Test that idle sessions are cleaned up after session_timeout
+        // Using short timeouts for testing (5 seconds instead of 180)
+        let timeouts = TimeoutConfig {
+            rekey_after: Duration::from_secs(10),
+            reject_after: Duration::from_secs(15),
+            session_timeout: Duration::from_secs(5),
+        };
+
         let (alice_private, alice_public) = dh_generate();
         let (bob_private, bob_public) = dh_generate();
 
-        let alice = Connection::new("127.0.0.1:0".parse().unwrap(), alice_private)
-            .await
-            .unwrap();
-        let bob = Connection::new("127.0.0.1:0".parse().unwrap(), bob_private)
-            .await
-            .unwrap();
+        let alice = hightower_wireguard::transport::Connection::with_timeouts(
+            "127.0.0.1:0".parse().unwrap(),
+            alice_private,
+            timeouts,
+        )
+        .await
+        .unwrap();
+        let bob = hightower_wireguard::transport::Connection::with_timeouts(
+            "127.0.0.1:0".parse().unwrap(),
+            bob_private,
+            timeouts,
+        )
+        .await
+        .unwrap();
 
         let alice_addr = alice.local_addr();
         let bob_addr = bob.local_addr();
@@ -145,9 +180,8 @@ mod transport_security_tests {
         alice_stream.send(b"hello").await.unwrap();
         assert_eq!(bob_stream.recv().await.unwrap(), b"hello");
 
-        // Wait for session timeout (180 seconds + buffer)
-        println!("Waiting for session timeout (this takes ~3 minutes)...");
-        sleep(Duration::from_secs(185)).await;
+        // Wait for session timeout (5 seconds + buffer for maintenance interval)
+        sleep(Duration::from_secs(7)).await;
 
         // Try to send - should fail due to no session
         let result = alice_stream.send(b"should fail").await;

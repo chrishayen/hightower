@@ -82,6 +82,27 @@ macro_rules! error_session {
     };
 }
 
+/// Optional timeout configuration for Connection
+#[derive(Debug, Clone, Copy)]
+pub struct TimeoutConfig {
+    /// Time after which to initiate a new handshake (default: 120 seconds)
+    pub rekey_after: Duration,
+    /// Time after which to reject packets (default: 180 seconds)
+    pub reject_after: Duration,
+    /// Time after which to clean up idle sessions (default: 180 seconds)
+    pub session_timeout: Duration,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            rekey_after: crate::protocol::REKEY_AFTER_TIME,
+            reject_after: crate::protocol::REJECT_AFTER_TIME,
+            session_timeout: Duration::from_secs(180),
+        }
+    }
+}
+
 /// A WireGuard transport connection manager.
 ///
 /// This is the main entry point for the transport layer. It manages all
@@ -94,12 +115,21 @@ pub struct Connection {
 impl Connection {
     /// Create a new WireGuard transport connection.
     pub async fn new(bind_addr: SocketAddr, private_key: PrivateKey) -> Result<Self, Error> {
+        Self::with_timeouts(bind_addr, private_key, TimeoutConfig::default()).await
+    }
+
+    /// Create a new WireGuard transport connection with custom timeouts.
+    pub async fn with_timeouts(
+        bind_addr: SocketAddr,
+        private_key: PrivateKey,
+        timeouts: TimeoutConfig,
+    ) -> Result<Self, Error> {
         let udp_socket = UdpSocket::bind(bind_addr).await?;
         let local_addr = udp_socket.local_addr()?;
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
-        let actor = ConnectionActor::new(udp_socket, private_key, cmd_tx.clone());
+        let actor = ConnectionActor::new(udp_socket, private_key, cmd_tx.clone(), timeouts);
         tokio::spawn(actor.run(cmd_rx));
 
         debug!(addr = %local_addr, "Created WireGuard connection");
@@ -255,6 +285,9 @@ struct ConnectionActor {
 
     // Command channel to pass to streams
     cmd_tx: mpsc::UnboundedSender<Command>,
+
+    // Timeout configuration
+    timeouts: TimeoutConfig,
 }
 
 struct SessionState {
@@ -294,7 +327,7 @@ impl SessionState {
         time_since_send >= keepalive_interval
     }
 
-    fn needs_rekey(&self, now: Instant) -> bool {
+    fn needs_rekey(&self, now: Instant, rekey_after: Duration) -> bool {
         // Only the initiator is responsible for time-based rekeying (WireGuard spec)
         if !self.is_initiator {
             return false;
@@ -305,7 +338,7 @@ impl SessionState {
         }
 
         let session_age = now.duration_since(self.created_at);
-        session_age >= crate::protocol::REKEY_AFTER_TIME
+        session_age >= rekey_after
     }
 
     fn get_active_session(&self) -> Option<&ActiveSession> {
@@ -380,7 +413,7 @@ struct StreamState {
 }
 
 impl ConnectionActor {
-    fn new(udp_socket: UdpSocket, private_key: PrivateKey, cmd_tx: mpsc::UnboundedSender<Command>) -> Self {
+    fn new(udp_socket: UdpSocket, private_key: PrivateKey, cmd_tx: mpsc::UnboundedSender<Command>, timeouts: TimeoutConfig) -> Self {
         let protocol = WireGuardProtocol::new(Some(private_key));
 
         Self {
@@ -395,6 +428,7 @@ impl ConnectionActor {
             listeners: Vec::new(),
             handshake_completed: false,
             cmd_tx,
+            timeouts,
         }
     }
 
@@ -542,7 +576,13 @@ impl ConnectionActor {
             error_resp!("Failed to create session (possible ID collision) for {}", from);
             return;
         }
-        self.create_incoming_stream(peer_public_key, from);
+
+        // Only create a new stream if one doesn't already exist for this peer
+        // This prevents creating duplicate streams during rekey while allowing reconnects
+        if !self.peer_to_stream.contains_key(&peer_public_key) {
+            self.create_incoming_stream(peer_public_key, from);
+        }
+
         self.enable_maintenance_if_first();
     }
 
@@ -954,9 +994,10 @@ impl ConnectionActor {
 
     async fn initiate_rekeys(&mut self, now: Instant) {
         let mut rekeys = Vec::new();
+        let rekey_after = self.timeouts.rekey_after;
 
         for (session_id, session_state) in &self.sessions {
-            if !session_state.needs_rekey(now) {
+            if !session_state.needs_rekey(now, rekey_after) {
                 continue;
             }
 
@@ -1003,7 +1044,7 @@ impl ConnectionActor {
     }
 
     fn cleanup_stale_connections(&mut self, now: Instant) {
-        const SESSION_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes
+        let session_timeout = self.timeouts.session_timeout;
 
         // Remove stale sessions
         let mut stale_peers = Vec::new();
@@ -1011,7 +1052,7 @@ impl ConnectionActor {
             let last_activity = session_state.last_recv.max(session_state.last_send);
             let age = now.duration_since(last_activity);
 
-            if age > SESSION_TIMEOUT {
+            if age > session_timeout {
                 debug!(
                     session_id = session_id.0,
                     peer = %hex::encode(&session_state.peer_public_key[..8]),

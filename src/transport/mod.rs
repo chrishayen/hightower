@@ -1,3 +1,3 @@
 mod connection;
 
-pub use connection::{Connection, Stream, Error};
+pub use connection::{Connection, Stream, Error, TimeoutConfig};
