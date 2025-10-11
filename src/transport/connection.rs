@@ -14,6 +14,74 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
+// Debug logging macros with role prefix
+macro_rules! debug_init {
+    ($($arg:tt)*) => {
+        debug!("INITIATOR ---- {}", format!($($arg)*));
+    };
+}
+
+macro_rules! debug_resp {
+    ($($arg:tt)*) => {
+        debug!("RESPONDER ---- {}", format!($($arg)*));
+    };
+}
+
+macro_rules! info_init {
+    ($($arg:tt)*) => {
+        info!("INITIATOR ---- {}", format!($($arg)*));
+    };
+}
+
+macro_rules! info_resp {
+    ($($arg:tt)*) => {
+        info!("RESPONDER ---- {}", format!($($arg)*));
+    };
+}
+
+macro_rules! error_init {
+    ($($arg:tt)*) => {
+        error!("INITIATOR ---- {}", format!($($arg)*));
+    };
+}
+
+macro_rules! error_resp {
+    ($($arg:tt)*) => {
+        error!("RESPONDER ---- {}", format!($($arg)*));
+    };
+}
+
+// For session-aware logging
+macro_rules! debug_session {
+    ($is_init:expr, $($arg:tt)*) => {
+        if $is_init {
+            debug_init!($($arg)*);
+        } else {
+            debug_resp!($($arg)*);
+        }
+    };
+}
+
+macro_rules! info_session {
+    ($is_init:expr, $($arg:tt)*) => {
+        if $is_init {
+            info_init!($($arg)*);
+        } else {
+            info_resp!($($arg)*);
+        }
+    };
+}
+
+macro_rules! error_session {
+    ($is_init:expr, $($arg:tt)*) => {
+        if $is_init {
+            error_init!($($arg)*);
+        } else {
+            error_resp!($($arg)*);
+        }
+    };
+}
+
 /// A WireGuard transport connection manager.
 ///
 /// This is the main entry point for the transport layer. It manages all
@@ -372,7 +440,7 @@ impl ConnectionActor {
     }
 
     async fn handle_connect(&mut self, addr: SocketAddr, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<Stream, Error>>) {
-        debug!(peer = %addr, "Handling connect command");
+        debug_init!("Handling connect command to peer {}", addr);
 
         match self.initiate_handshake(addr, peer_public_key).await {
             Ok(handshake_id) => {
@@ -444,12 +512,12 @@ impl ConnectionActor {
             }
         };
 
-        debug!(from = %from, sender = initiation.sender, "Received handshake initiation");
+        debug_resp!("Received handshake initiation from {}, sender={}", from, initiation.sender);
 
         let response = match self.protocol.process_initiation(&initiation) {
             Ok(resp) => resp,
             Err(e) => {
-                error!(from = %from, error = ?e, "Failed to process handshake initiation");
+                error_resp!("Failed to process handshake initiation from {}: {:?}", from, e);
                 return;
             }
         };
@@ -457,21 +525,21 @@ impl ConnectionActor {
         let peer_public_key = match self.protocol.get_session(response.sender) {
             Some(session) => session.peer_public_key,
             None => {
-                error!(from = %from, "No session found after processing initiation");
+                error_resp!("No session found after processing initiation from {}", from);
                 return;
             }
         };
 
         if let Err(e) = self.send_handshake_response(&response, from).await {
-            error!(from = %from, error = ?e, "Failed to send handshake response");
+            error_resp!("Failed to send handshake response to {}: {:?}", from, e);
             return;
         }
 
-        debug!(from = %from, "Sent handshake response");
+        debug_resp!("Sent handshake response to {}", from);
 
         // We're the responder (they initiated to us)
         if !self.create_session_from_response(response.sender, peer_public_key, from, false) {
-            error!(from = %from, "Failed to create session (possible ID collision)");
+            error_resp!("Failed to create session (possible ID collision) for {}", from);
             return;
         }
         self.create_incoming_stream(peer_public_key, from);
@@ -496,11 +564,9 @@ impl ConnectionActor {
 
         // Check for session ID collision
         if self.sessions.contains_key(&sid) {
-            error!(
-                session_id = session_id,
-                peer = %hex::encode(&peer_public_key[..8]),
-                "Session ID collision detected! Rejecting new session"
-            );
+            error_session!(is_initiator,
+                "Session ID collision detected! Rejecting new session: session_id={}, peer={}",
+                session_id, hex::encode(&peer_public_key[..8]));
             // TODO: In production, might want to force the old session to rekey
             return false;
         }
@@ -526,23 +592,19 @@ impl ConnectionActor {
             }
         };
 
-        debug!(
-            from = %from,
-            sender = response.sender,
-            receiver = response.receiver,
-            "Received handshake response"
-        );
+        debug_init!("Received handshake response from {}, sender={}, receiver={}",
+            from, response.sender, response.receiver);
 
         let pending = match self.pending_handshakes.remove(&response.receiver) {
             Some(p) => p,
             None => {
-                debug!(from = %from, receiver = response.receiver, "No pending handshake");
+                debug!("No pending handshake for receiver {} from {}", response.receiver, from);
                 return;
             }
         };
 
         if let Err(e) = self.protocol.process_response(&response) {
-            error!(from = %from, error = ?e, "Failed to process handshake response");
+            error_init!("Failed to process handshake response from {}: {:?}", from, e);
             if let HandshakeReply::Connect(reply) = pending.reply {
                 let _ = reply.send(Err(Error::HandshakeFailed(e.to_string())));
             }
@@ -573,11 +635,8 @@ impl ConnectionActor {
     }
 
     async fn handle_rekey_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, old_session_id: SessionId, peer_public_key: PublicKey25519) {
-        info!(
-            session_id = old_session_id.0,
-            new_session_id = response.sender,
-            "Rekey completed"
-        );
+        info_init!("Rekey completed: old_session_id={}, new_session_id={}",
+            old_session_id.0, response.sender);
 
         // Get queued packets from old session
         let queued_packets = match self.sessions.get_mut(&old_session_id) {
@@ -596,11 +655,9 @@ impl ConnectionActor {
 
         // Create new session with new ID (we're the initiator of the rekey)
         if !self.create_session_from_response(response.sender, peer_public_key, from, true) {
-            error!(
-                old_session_id = old_session_id.0,
-                new_session_id = response.sender,
-                "Failed to create new session after rekey (possible ID collision)"
-            );
+            error_init!(
+                "Failed to create new session after rekey (possible ID collision): old_session_id={}, new_session_id={}",
+                old_session_id.0, response.sender);
             // Session is lost, stream will error on next operation
             return;
         }
@@ -678,7 +735,12 @@ impl ConnectionActor {
 
         // Handle keepalive
         if plaintext.is_empty() {
-            debug!(from = %from, "Received keep-alive");
+            // Get session role for logging
+            if let Some(session_state) = self.sessions.get(&session_id) {
+                debug_session!(session_state.is_initiator, "Received keep-alive from {}", from);
+            } else {
+                debug!("Received keep-alive from {} (session already removed)", from);
+            }
             return;
         }
 
@@ -721,7 +783,7 @@ impl ConnectionActor {
 
         self.udp_socket.send_to(&handshake_bytes, addr).await?;
 
-        debug!(addr = %addr, handshake_id = handshake_id, "Sent handshake initiation");
+        debug_init!("Sent handshake initiation to {}, handshake_id={}", addr, handshake_id);
 
         Ok(handshake_id)
     }
@@ -875,16 +937,16 @@ impl ConnectionActor {
             session_state.last_send = Instant::now();
 
             if let Some(endpoint) = session_state.endpoint {
-                keepalives.push((session_id.0, counter, encrypted, endpoint));
+                keepalives.push((session_id.0, counter, encrypted, endpoint, session_state.is_initiator));
             }
         }
 
         // Send keepalives after releasing mutable borrows
-        for (session_id, counter, encrypted, endpoint) in keepalives {
+        for (session_id, counter, encrypted, endpoint, is_initiator) in keepalives {
             if let Err(e) = self.send_transport(session_id, counter, encrypted, endpoint).await {
-                error!(session_id = session_id, error = ?e, "Failed to send keepalive");
+                error_session!(is_initiator, "Failed to send keepalive to {}, session_id={}: {:?}", endpoint, session_id, e);
             } else {
-                debug!(session_id = session_id, "Sent keepalive");
+                debug_session!(is_initiator, "Sent keepalive to {}, session_id={}", endpoint, session_id);
             }
         }
     }
@@ -912,11 +974,8 @@ impl ConnectionActor {
     }
 
     async fn initiate_single_rekey(&mut self, old_session_id: SessionId, peer_public_key: PublicKey25519, endpoint: SocketAddr) {
-        info!(
-            session_id = old_session_id.0,
-            peer = %hex::encode(&peer_public_key[..8]),
-            "Initiating rekey"
-        );
+        info_init!("Initiating rekey for session_id={}, peer={}",
+            old_session_id.0, hex::encode(&peer_public_key[..8]));
 
         let handshake_id = match self.initiate_handshake(endpoint, peer_public_key).await {
             Ok(id) => id,
