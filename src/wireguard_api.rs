@@ -1,6 +1,6 @@
 use crate::certificates::NodeCertificate;
 use crate::context::NamespacedKv;
-use hightower_wireguard::transport::{Conn, Error, Server as TransportServer};
+use hightower_wireguard::transport::{Connection as TransportServer, Stream, Error};
 use std::sync::{Arc, OnceLock, RwLock};
 use tracing::{debug, error};
 
@@ -37,34 +37,19 @@ pub async fn initialize(certificate: &NodeCertificate) {
                 "gateway: WireGuard transport server created successfully"
             );
 
-            // Spawn background packet processor
-            debug!("gateway: Spawning WireGuard packet processor");
-            let server_clone = server.clone();
-            tokio::spawn(async move {
-                debug!("gateway: WireGuard packet processor starting");
-                if let Err(e) = server_clone.run().await {
-                    error!(error = ?e, "gateway: WireGuard transport server error");
-                }
-            });
-
-            // Spawn maintenance task for keepalive and rekey
-            debug!("gateway: Spawning WireGuard maintenance task");
-            let server_maintenance = server.clone();
-            tokio::spawn(async move {
-                server_maintenance.run_maintenance().await
-            });
+            TRANSPORT_SERVER.set(server).ok();
 
             // Start WireGuard API listener
             debug!("gateway: Spawning WireGuard API listener");
-            let server_clone = server.clone();
-            tokio::spawn(async move {
-                debug!("gateway: WireGuard API listener starting");
-                if let Err(e) = start_api_listener(server_clone).await {
-                    error!(error = ?e, "gateway: WireGuard API listener error");
-                }
-            });
+            if let Some(server) = TRANSPORT_SERVER.get() {
+                tokio::spawn(async move {
+                    debug!("gateway: WireGuard API listener starting");
+                    if let Err(e) = start_api_listener(server).await {
+                        error!(error = ?e, "gateway: WireGuard API listener error");
+                    }
+                });
+            }
 
-            TRANSPORT_SERVER.set(server).ok();
             debug!("gateway: WireGuard transport server fully initialized");
         }
         Err(e) => {
@@ -73,35 +58,34 @@ pub async fn initialize(certificate: &NodeCertificate) {
     }
 }
 
-async fn start_api_listener(server: TransportServer) -> Result<(), Error> {
+async fn start_api_listener(server: &TransportServer) -> Result<(), Error> {
     // Listen for HTTP connections over WireGuard
-    let listener = server.listen("tcp", ":8080").await?;
-    debug!("gateway: WireGuard API listening on :8080");
+    let mut listener = server.listen().await?;
+    debug!("gateway: WireGuard API listening for connections");
 
     loop {
-        match listener.accept().await {
-            Ok(conn) => {
-                debug!(peer_addr = ?conn.peer_addr(), "Accepted WireGuard connection");
+        match listener.recv().await {
+            Some(mut stream) => {
+                debug!(peer_addr = ?stream.peer_addr(), "Accepted WireGuard connection");
 
                 tokio::spawn(async move {
                     // Simple HTTP response handler
-                    let mut buf = vec![0u8; 8192];
-                    match conn.recv(&mut buf).await {
-                        Ok(n) => {
-                            let request = String::from_utf8_lossy(&buf[..n]);
+                    match stream.recv().await {
+                        Ok(data) => {
+                            let request = String::from_utf8_lossy(&data);
                             let first_line = request.lines().next().unwrap_or("");
                             debug!(request = first_line, "gateway: Received WireGuard HTTP request");
 
                             if request.contains("GET /ping") {
                                 let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nPong!";
-                                if let Err(e) = conn.send(response).await {
+                                if let Err(e) = stream.send(response).await {
                                     error!(error = ?e, "Failed to send response");
                                 }
                             } else if request.contains("GET /peers/") {
-                                handle_peer_lookup(&request, &conn).await;
+                                handle_peer_lookup(&request, &stream).await;
                             } else {
                                 let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-                                if let Err(e) = conn.send(response).await {
+                                if let Err(e) = stream.send(response).await {
                                     error!(error = ?e, "Failed to send 404");
                                 }
                             }
@@ -112,14 +96,16 @@ async fn start_api_listener(server: TransportServer) -> Result<(), Error> {
                     }
                 });
             }
-            Err(e) => {
-                error!(error = ?e, "Failed to accept WireGuard connection");
+            None => {
+                debug!("gateway: WireGuard listener closed");
+                break;
             }
         }
     }
+    Ok(())
 }
 
-async fn handle_peer_lookup(request: &str, conn: &Conn) {
+async fn handle_peer_lookup(request: &str, stream: &Stream) {
     debug!("gateway: Handling peer lookup request");
 
     // Extract node_id from request like "GET /peers/{node_id}"
@@ -133,7 +119,7 @@ async fn handle_peer_lookup(request: &str, conn: &Conn) {
     let Some(node_id) = node_id else {
         debug!("gateway: Bad peer lookup request - no node_id");
         let response = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
-        let _ = conn.send(response).await;
+        let _ = stream.send(response).await;
         return;
     };
 
@@ -143,7 +129,7 @@ async fn handle_peer_lookup(request: &str, conn: &Conn) {
     let Some(kv) = GATEWAY_KV.get() else {
         error!("Gateway KV not initialized");
         let response = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
-        let _ = conn.send(response).await;
+        let _ = stream.send(response).await;
         return;
     };
 
@@ -182,7 +168,7 @@ async fn handle_peer_lookup(request: &str, conn: &Conn) {
                 response_body.len(),
                 response_body
             );
-            if let Err(e) = conn.send(response.as_bytes()).await {
+            if let Err(e) = stream.send(response.as_bytes()).await {
                 error!(error = ?e, "gateway: Failed to send peer lookup response");
             } else {
                 debug!(node_id = node_id, "gateway: Sent peer public key");
@@ -190,7 +176,7 @@ async fn handle_peer_lookup(request: &str, conn: &Conn) {
         }
         None => {
             let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-            let _ = conn.send(response).await;
+            let _ = stream.send(response).await;
         }
     }
 }

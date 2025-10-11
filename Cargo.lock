@@ -1005,8 +1005,6 @@ dependencies = [
 [[package]]
 name = "hightower-wireguard"
 version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44b463a1367ce4b2f50a429558e8f5d0f7bb018662cc48a7d6262bc4cb278914"
 dependencies = [
  "blake2",
  "byteorder",

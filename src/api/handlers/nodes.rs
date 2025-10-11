@@ -108,6 +108,23 @@ pub(crate) async fn deregister_node(
     debug!(node_id = %node_id, "Gateway received node deregistration request");
 
     let registration_key = registration_storage_key(&node_id);
+
+    // Load registration to get public key for WireGuard cleanup
+    let public_key_hex = kv
+        .get_bytes(&registration_key)
+        .ok()
+        .flatten()
+        .and_then(|data| {
+            serde_json::from_slice::<NodeRegistrationRequest>(&data)
+                .ok()
+                .map(|reg| reg.public_key_hex)
+        });
+
+    // Disconnect WireGuard peer if available
+    if let Some(key_hex) = public_key_hex {
+        disconnect_wireguard_peer(&node_id, &key_hex).await;
+    }
+
     kv.put_bytes(&registration_key, b"__DELETED__")
         .map_err(|err| RootApiError::Storage(format!("failed to mark registration deleted: {}", err)))?;
 
@@ -119,6 +136,38 @@ pub(crate) async fn deregister_node(
 
     debug!(node_id = %node_id, "Deregistered node");
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn disconnect_wireguard_peer(node_id: &str, key_hex: &str) {
+    let Some(transport) = crate::wireguard_api::get_transport_server() else {
+        return;
+    };
+
+    let Ok(peer_public_key) = hex::decode(key_hex) else {
+        return;
+    };
+
+    if peer_public_key.len() != 32 {
+        return;
+    }
+
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&peer_public_key);
+
+    if let Err(e) = transport.disconnect(key_array).await {
+        tracing::error!(
+            error = ?e,
+            node_id = %node_id,
+            "gateway: Failed to disconnect WireGuard peer"
+        );
+        return;
+    }
+
+    debug!(
+        node_id = %node_id,
+        public_key = &key_hex[..8],
+        "gateway: Successfully disconnected WireGuard peer"
+    );
 }
 
 fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<(), RootApiError> {
