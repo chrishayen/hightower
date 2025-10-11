@@ -36,14 +36,21 @@ impl fmt::Display for AppError {
 impl Error for AppError {}
 
 fn main() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    eprintln!("RUST_LOG: {}", rust_log);
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|e| {
+        eprintln!("Failed to parse RUST_LOG: {:?}, using default 'info'", e);
+        EnvFilter::new("info")
+    });
 
     let subscriber = tracing_fmt::Subscriber::builder()
         .with_env_filter(filter)
         .with_target(false)
         .finish();
 
-    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set tracing subscriber");
 
     let cli = Cli::parse();
 
