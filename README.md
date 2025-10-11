@@ -35,7 +35,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hightower-client = "0.1.2"
+hightower-client = "0.1.4"
 ```
 
 ## Usage

@@ -522,7 +522,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hightower-client"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hex",
  "hightower-kv",
@@ -566,9 +566,9 @@ checksum = "f059385b30b3d37a19ac20d57ca6df243217742dce979bb4c0dfecb9dff4c8d9"
 
 [[package]]
 name = "hightower-wireguard"
-version = "0.1.5"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44b463a1367ce4b2f50a429558e8f5d0f7bb018662cc48a7d6262bc4cb278914"
+checksum = "228a1d7291c37d2e4b51fc9c3ac85ebd37b478ccc873293b9fe9e4339a8ec6d4"
 dependencies = [
  "blake2",
  "byteorder",
@@ -1134,7 +1134,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -1,22 +1,23 @@
-use hightower_wireguard::transport::Server;
+use hightower_wireguard::connection::Connection;
+use std::sync::Arc;
 
-/// Wrapper around hightower-wireguard transport server.
+/// Wrapper around hightower-wireguard transport connection.
 /// Provides access to the underlying transport for communication.
 #[derive(Clone)]
 pub struct TransportServer {
-    server: Server,
+    connection: Arc<Connection>,
 }
 
 impl TransportServer {
-    pub(crate) fn new(server: Server) -> Self {
-        Self { server }
+    pub(crate) fn new(connection: Connection) -> Self {
+        Self { connection: Arc::new(connection) }
     }
 
-    /// Get a reference to the underlying transport server
+    /// Get a reference to the underlying transport connection
     ///
-    /// Use this to access the full hightower-wireguard Server API
+    /// Use this to access the full hightower-wireguard Connection API
     /// for sending and receiving data.
-    pub fn server(&self) -> &Server {
-        &self.server
+    pub fn connection(&self) -> &Connection {
+        &self.connection
     }
 }

@@ -3,11 +3,11 @@ use crate::storage::{ConnectionStorage, StoredConnection, current_timestamp};
 use crate::transport::TransportServer;
 use crate::types::{PeerInfo, RegistrationRequest, RegistrationResponse};
 use hightower_wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
-use hightower_wireguard::transport::Server;
+use hightower_wireguard::connection::Connection;
 use reqwest::StatusCode;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8008";
 const API_PATH: &str = "/api/nodes";
@@ -156,38 +156,14 @@ impl HightowerConnection {
             ClientError::Configuration(format!("invalid bind address: {}", e))
         })?;
 
-        let server = Server::new(bind_addr, private_key)
+        let connection = Connection::new(bind_addr, private_key)
             .await
-            .map_err(|e| ClientError::Transport(format!("failed to create transport server: {}", e)))?;
+            .map_err(|e| ClientError::Transport(format!("failed to create transport connection: {}", e)))?;
 
-        debug!("Created transport server");
-
-        // Spawn background processor
-        let server_clone = server.clone();
-        tokio::spawn(async move {
-            if let Err(e) = server_clone.run().await {
-                error!(error = ?e, "Transport server error");
-            }
-        });
-
-        // Spawn maintenance task
-        let server_maintenance = server.clone();
-        tokio::spawn(async move {
-            server_maintenance.run_maintenance().await
-        });
-
-        // Wait for transport to be ready
-        server
-            .wait_until_ready()
-            .await
-            .map_err(|e| ClientError::Transport(format!("transport not ready: {}", e)))?;
-
-        debug!("Transport server ready");
+        debug!("Created transport connection");
 
         // 3. Discover network info using actual bound port
-        let local_addr = server
-            .local_addr()
-            .map_err(|e| ClientError::Transport(format!("failed to get local address: {}", e)))?;
+        let local_addr = connection.local_addr();
 
         let network_info = crate::ip_discovery::discover_with_bound_address(local_addr, None)
             .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
@@ -228,7 +204,7 @@ impl HightowerConnection {
                 ClientError::InvalidResponse(format!("invalid gateway public key format: {:?}", e))
             })?;
 
-        server
+        connection
             .add_peer(gateway_public_key, None)
             .await
             .map_err(|e| ClientError::Transport(format!("failed to add gateway as peer: {}", e)))?;
@@ -262,7 +238,7 @@ impl HightowerConnection {
             .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
 
         Ok(Self {
-            transport: TransportServer::new(server),
+            transport: TransportServer::new(connection),
             node_id: registration.node_id,
             assigned_ip: registration.assigned_ip,
             token: registration.token,
@@ -296,41 +272,19 @@ impl HightowerConnection {
             .try_into()
             .map_err(|e| ClientError::Storage(format!("invalid gateway public key format: {:?}", e)))?;
 
-        // Create transport server with stored private key
+        // Create transport connection with stored private key
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().map_err(|e| {
             ClientError::Configuration(format!("invalid bind address: {}", e))
         })?;
 
-        let server = Server::new(bind_addr, private_key)
+        let connection = Connection::new(bind_addr, private_key)
             .await
-            .map_err(|e| ClientError::Transport(format!("failed to create transport server: {}", e)))?;
+            .map_err(|e| ClientError::Transport(format!("failed to create transport connection: {}", e)))?;
 
-        debug!("Created transport server with stored keys");
-
-        // Spawn background processor
-        let server_clone = server.clone();
-        tokio::spawn(async move {
-            if let Err(e) = server_clone.run().await {
-                error!(error = ?e, "Transport server error");
-            }
-        });
-
-        // Spawn maintenance task
-        let server_maintenance = server.clone();
-        tokio::spawn(async move {
-            server_maintenance.run_maintenance().await
-        });
-
-        // Wait for transport to be ready
-        server
-            .wait_until_ready()
-            .await
-            .map_err(|e| ClientError::Transport(format!("transport not ready: {}", e)))?;
+        debug!("Created transport connection with stored keys");
 
         // Discover current network info (may have changed)
-        let local_addr = server
-            .local_addr()
-            .map_err(|e| ClientError::Transport(format!("failed to get local address: {}", e)))?;
+        let local_addr = connection.local_addr();
 
         let _network_info = crate::ip_discovery::discover_with_bound_address(local_addr, None)
             .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
@@ -338,7 +292,7 @@ impl HightowerConnection {
         debug!("Rediscovered network information");
 
         // Add gateway as peer
-        server
+        connection
             .add_peer(gateway_public_key, None)
             .await
             .map_err(|e| ClientError::Transport(format!("failed to add gateway as peer: {}", e)))?;
@@ -355,7 +309,7 @@ impl HightowerConnection {
             .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
 
         Ok(Self {
-            transport: TransportServer::new(server),
+            transport: TransportServer::new(connection),
             node_id: stored.node_id,
             assigned_ip: stored.assigned_ip,
             token: stored.token,
@@ -391,30 +345,29 @@ impl HightowerConnection {
     pub async fn ping_gateway(&self) -> Result<(), ClientError> {
         debug!("Pinging gateway over WireGuard");
 
-        // Dial the gateway's WireGuard endpoint
-        let conn = self
+        // Connect to the gateway's WireGuard endpoint
+        let mut stream = self
             .transport
-            .server()
-            .dial("tcp", &self.gateway_endpoint.to_string(), self.gateway_public_key)
+            .connection()
+            .connect(self.gateway_endpoint, self.gateway_public_key)
             .await
-            .map_err(|e| ClientError::Transport(format!("failed to dial gateway: {}", e)))?;
+            .map_err(|e| ClientError::Transport(format!("failed to connect to gateway: {}", e)))?;
 
         debug!("WireGuard connection established to gateway");
 
         // Send HTTP GET request to /ping
         let request = b"GET /ping HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n";
-        conn.send(request)
+        stream.send(request)
             .await
             .map_err(|e| ClientError::Transport(format!("failed to send ping request: {}", e)))?;
 
         // Receive response
-        let mut buf = vec![0u8; 8192];
-        let n = conn
-            .recv(&mut buf)
+        let response_bytes = stream
+            .recv()
             .await
             .map_err(|e| ClientError::Transport(format!("failed to receive ping response: {}", e)))?;
 
-        let response = String::from_utf8_lossy(&buf[..n]);
+        let response = String::from_utf8_lossy(&response_bytes);
 
         if response.contains("200 OK") && response.contains("Pong") {
             debug!("Successfully pinged gateway");
@@ -488,7 +441,7 @@ impl HightowerConnection {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn dial(&self, peer: &str, port: u16) -> Result<hightower_wireguard::transport::Conn, ClientError> {
+    pub async fn dial(&self, peer: &str, port: u16) -> Result<hightower_wireguard::connection::Stream, ClientError> {
         // 1. Get peer info from gateway
         let peer_info = self.get_peer_info(peer).await?;
 
@@ -503,7 +456,7 @@ impl HightowerConnection {
 
         // 3. Add peer to WireGuard (idempotent - safe to call multiple times)
         self.transport
-            .server()
+            .connection()
             .add_peer(peer_public_key, peer_info.endpoint)
             .await
             .map_err(|e| ClientError::Transport(format!("failed to add peer: {}", e)))?;
@@ -512,25 +465,28 @@ impl HightowerConnection {
             peer_id = %peer_info.node_id,
             peer_ip = %peer_info.assigned_ip,
             port = port,
-            "Added peer and dialing"
+            "Added peer and connecting"
         );
 
-        // 4. Dial using the peer's assigned IP on the WireGuard network
-        let addr = format!("{}:{}", peer_info.assigned_ip, port);
-        let conn = self
+        // 4. Connect using the peer's assigned IP on the WireGuard network
+        let peer_addr: SocketAddr = format!("{}:{}", peer_info.assigned_ip, port)
+            .parse()
+            .map_err(|e| ClientError::Transport(format!("invalid peer address: {}", e)))?;
+
+        let stream = self
             .transport
-            .server()
-            .dial("tcp", &addr, peer_public_key)
+            .connection()
+            .connect(peer_addr, peer_public_key)
             .await
-            .map_err(|e| ClientError::Transport(format!("failed to dial peer: {}", e)))?;
+            .map_err(|e| ClientError::Transport(format!("failed to connect to peer: {}", e)))?;
 
         debug!(
             peer_id = %peer_info.node_id,
-            addr = %addr,
-            "Successfully dialed peer"
+            addr = %peer_addr,
+            "Successfully connected to peer"
         );
 
-        Ok(conn)
+        Ok(stream)
     }
 
     /// Disconnect from the gateway and deregister
