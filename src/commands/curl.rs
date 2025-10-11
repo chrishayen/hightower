@@ -39,7 +39,7 @@ pub async fn run(
         eprintln!("Fetching from peer {} on port {}...", peer_ip, port);
     }
 
-    let conn = connection
+    let mut conn = connection
         .dial(peer_ip, port)
         .await
         .context(format!("Failed to dial peer {}", peer_ip))?;
@@ -62,14 +62,13 @@ pub async fn run(
     }
 
     let mut response_data = Vec::new();
-    let mut buf = vec![0u8; 8192];
 
     loop {
-        let n = conn.recv(&mut buf).await.context("Failed to receive response")?;
-        if n == 0 {
+        let data = conn.recv().await.context("Failed to receive response")?;
+        if data.is_empty() {
             break;
         }
-        response_data.extend_from_slice(&buf[..n]);
+        response_data.extend_from_slice(&data);
     }
 
     let response_str = String::from_utf8_lossy(&response_data);

@@ -3,18 +3,18 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub fn run_gateway(kv_path: &str) -> Result<()> {
-    let _logging_guard = gateway::logging::init();
+    let _logging_guard = hightower_gateway::logging::init();
 
     let kv_path = PathBuf::from(kv_path);
-    let context = gateway::context::initialize_with_token_source(
+    let context = hightower_gateway::context::initialize_with_token_source(
         Some(&kv_path),
         |key| std::env::var(key)
     )?;
 
-    gateway::start(&context);
+    hightower_gateway::start(&context);
 
     // Wait for gateway to be ready
-    if let Err(e) = gateway::wait_until_ready(Duration::from_secs(5)) {
+    if let Err(e) = hightower_gateway::wait_until_ready(Duration::from_secs(5)) {
         bail!("Failed to start gateway: {:?}", e);
     }
     println!("Gateway server ready on 0.0.0.0");
