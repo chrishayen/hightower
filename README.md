@@ -49,10 +49,10 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # For handshake protocol only
-hightower-wireguard = "0.1.5"
+hightower-wireguard = "0.2.1"
 
-# For transport layer (UDP Server, Listener, Conn)
-hightower-wireguard = { version = "0.1.5", features = ["transport"] }
+# For transport layer (UDP Connection and Stream)
+hightower-wireguard = { version = "0.2.1", features = ["transport"] }
 ```
 
 ## Usage
@@ -154,7 +154,7 @@ With the `transport` feature enabled, you can use the high-level UDP-based trans
 
 ```rust
 use hightower_wireguard::crypto::dh_generate;
-use hightower_wireguard::connection::Server;
+use hightower_wireguard::connection::Connection;
 
 #[tokio::main]
 async fn main() {
@@ -162,53 +162,35 @@ async fn main() {
     let (alice_private, alice_public) = dh_generate();
     let (bob_private, bob_public) = dh_generate();
 
-    // Create servers
-    let alice_server = Server::new("127.0.0.1:8080".parse().unwrap(), alice_private)
+    // Create connections
+    let alice = Connection::new("127.0.0.1:0".parse().unwrap(), alice_private)
         .await
         .unwrap();
-    let bob_server = Server::new("127.0.0.1:8081".parse().unwrap(), bob_private)
+    let bob = Connection::new("127.0.0.1:0".parse().unwrap(), bob_private)
         .await
         .unwrap();
+
+    let alice_addr = alice.local_addr();
+    let bob_addr = bob.local_addr();
 
     // Add peers
-    alice_server.add_peer(bob_public, Some("127.0.0.1:8081".parse().unwrap())).await.unwrap();
-    bob_server.add_peer(alice_public, Some("127.0.0.1:8080".parse().unwrap())).await.unwrap();
+    alice.add_peer(bob_public, Some(bob_addr)).await.unwrap();
+    bob.add_peer(alice_public, Some(alice_addr)).await.unwrap();
 
-    // Start packet processing loops and maintenance tasks
-    let alice_clone = alice_server.clone();
-    tokio::spawn(async move { alice_clone.run().await });
+    // Bob listens for incoming connections
+    let mut bob_incoming = bob.listen().await.unwrap();
 
-    let bob_clone = bob_server.clone();
-    tokio::spawn(async move { bob_clone.run().await });
-
-    // Start maintenance tasks for keep-alive and rekey
-    let alice_maintenance = alice_server.clone();
-    let bob_maintenance = bob_server.clone();
-    tokio::spawn(async move { alice_maintenance.run_maintenance().await });
-    tokio::spawn(async move { bob_maintenance.run_maintenance().await });
-
-    // Wait for servers to be ready
-    alice_server.wait_until_ready().await.unwrap();
-    bob_server.wait_until_ready().await.unwrap();
-
-    // Bob listens for connections
-    let bob_listener = bob_server.listen("tcp", ":0").await.unwrap();
-
-    // Alice dials Bob
-    let alice_conn = alice_server
-        .dial("tcp", "127.0.0.1:8081", bob_public)
-        .await
-        .unwrap();
+    // Alice connects to Bob
+    let mut alice_stream = alice.connect(bob_addr, bob_public).await.unwrap();
 
     // Bob accepts the connection
-    let bob_conn = bob_listener.accept().await.unwrap();
+    let mut bob_stream = bob_incoming.recv().await.unwrap();
 
     // Send and receive data
-    alice_conn.send(b"Hello from Alice!").await.unwrap();
+    alice_stream.send(b"Hello from Alice!").await.unwrap();
 
-    let mut buf = vec![0u8; 1024];
-    let n = bob_conn.recv(&mut buf).await.unwrap();
-    println!("Bob received: {}", String::from_utf8_lossy(&buf[..n]));
+    let received = bob_stream.recv().await.unwrap();
+    println!("Bob received: {}", String::from_utf8_lossy(&received));
 }
 ```
 
@@ -217,36 +199,23 @@ async fn main() {
 Configure persistent keep-alive to maintain NAT mappings and detect dead peers:
 
 ```rust
-use hightower_wireguard::protocol::PeerInfo;
-
-// Configure Alice to send keep-alive packets to Bob every 25 seconds
-let peer_info = PeerInfo {
-    public_key: bob_public,
-    preshared_key: None,
-    endpoint: Some("127.0.0.1:8081".parse().unwrap()),
-    allowed_ips: Vec::new(),
-    persistent_keepalive: Some(25), // seconds
-};
-
-alice_server.add_peer(bob_public, Some("127.0.0.1:8081".parse().unwrap())).await.unwrap();
-
-// Update the peer with keep-alive configuration
-{
-    let mut protocol = alice_server.protocol().lock().await;
-    protocol.remove_peer(&bob_public);
-    protocol.add_peer(peer_info);
-}
+// Add peer with keep-alive packets sent every 25 seconds
+alice.add_peer_with_keepalive(
+    bob_public,
+    Some(bob_addr),
+    Some(25)  // send keep-alive every 25 seconds
+).await.unwrap();
 ```
 
 The transport layer provides:
-- **Server**: UDP socket management and packet routing
-- **Listener**: Accept incoming connections after handshakes
-- **Conn**: Bidirectional encrypted communication channel
-- Automatic handshake handling and session management
+- **Connection**: UDP socket management, packet routing, and session management
+- **Stream**: Bidirectional encrypted communication channel to a peer
+- Automatic handshake handling
 - Message encryption/decryption using session keys
 - Automatic keep-alive packets (configurable per-peer)
-- Automatic session rekeying after 120 seconds
+- Automatic session rekeying after 120 seconds (initiator only)
 - Endpoint roaming support for mobile devices
+- Session cleanup and timeout handling
 
 ## Testing
 
