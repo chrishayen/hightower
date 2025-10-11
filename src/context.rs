@@ -299,9 +299,6 @@ pub use kv::{GatewayAuthService, KvHandle, KvInitError, initialize as initialize
 pub use token::{TokenError, fetch as fetch_token};
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
-pub const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
-pub const GATEWAY_CERTIFICATE_KEY: &[u8] = b"certificates/gateway";
-pub const GATEWAY_PUBLIC_KEY: &[u8] = b"certificates/gateway_public_key";
 pub const HT_AUTH_KEY: &[u8] = b"secrets/ht_auth_key";
 const DEFAULT_AUTH_USERNAME_ENV: &str = "HT_DEFAULT_USER";
 const DEFAULT_AUTH_PASSWORD_ENV: &str = "HT_DEFAULT_PASSWORD";

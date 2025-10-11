@@ -1,4 +1,3 @@
-pub mod certificates;
 pub mod context;
 
 use context::CommonContext;
@@ -64,32 +63,4 @@ pub async fn deregister(connection: HightowerConnection) -> Result<(), String> {
         .disconnect()
         .await
         .map_err(|e| format!("Failed to disconnect: {:?}", e))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use context::fixtures;
-
-    #[tokio::test]
-    async fn run_connects_to_gateway() {
-        let ctx = fixtures::context();
-        ctx.kv.put_secret(context::HT_AUTH_KEY, b"test-auth-key");
-
-        // Note: This test will fail without a running gateway
-        // In a real test environment, you'd mock the gateway or skip this test
-        match run(&ctx).await {
-            Ok(connection) => {
-                assert!(!connection.node_id().is_empty());
-                assert!(!connection.assigned_ip().is_empty());
-
-                // Clean up
-                let _ = deregister(connection).await;
-            }
-            Err(e) => {
-                // Expected if no gateway is running
-                assert!(e.contains("Failed to connect"));
-            }
-        }
-    }
 }
