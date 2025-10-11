@@ -939,7 +939,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hightower-gateway"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "askama",
  "axum",
@@ -1004,7 +1004,9 @@ dependencies = [
 
 [[package]]
 name = "hightower-wireguard"
-version = "0.1.5"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "228a1d7291c37d2e4b51fc9c3ac85ebd37b478ccc873293b9fe9e4339a8ec6d4"
 dependencies = [
  "blake2",
  "byteorder",

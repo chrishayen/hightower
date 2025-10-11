@@ -1,6 +1,6 @@
 use crate::certificates::NodeCertificate;
 use crate::context::NamespacedKv;
-use hightower_wireguard::transport::{Connection as TransportServer, Stream, Error};
+use hightower_wireguard::connection::{Connection as TransportServer, Stream, Error};
 use std::sync::{Arc, OnceLock, RwLock};
 use tracing::{debug, error};
 

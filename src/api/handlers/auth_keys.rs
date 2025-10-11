@@ -296,7 +296,7 @@ mod tests {
             auth: Arc::clone(&context.auth),
         };
 
-        generate_auth_key(State(state.clone()))
+        let _ = generate_auth_key(State(state.clone()))
             .await
             .expect("generate succeeds");
 

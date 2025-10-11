@@ -11,5 +11,5 @@ pub(crate) use auth_keys::{generate_auth_key, list_auth_keys, revoke_auth_key, s
 pub(crate) use console::{console_dashboard, console_nodes, console_root, console_settings};
 pub(crate) use dashboard::dashboard_nodes;
 pub(crate) use health::root_health;
-pub(crate) use nodes::{deregister_node, register_node, registration_storage_key};
+pub(crate) use nodes::{deregister_node, register_node};
 pub(crate) use sessions::{change_password, create_session, delete_session};

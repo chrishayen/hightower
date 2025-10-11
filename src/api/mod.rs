@@ -355,7 +355,7 @@ mod tests {
     use crate::client::RootRegistrar;
     use crate::context::{initialize_kv, CommonContext, HT_AUTH_KEY};
     use crate::fixtures;
-    use handlers::registration_storage_key;
+    use handlers::nodes::registration_storage_key;
     use std::sync::mpsc;
     use tempfile::TempDir;
     use types::NodeRegistrationRequest;
