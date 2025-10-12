@@ -1,6 +1,6 @@
 [package]
 name = "hightower-gateway"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
 description = "Gateway service for the Hightower project"
@@ -28,7 +28,6 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 hyper = { version = "1.7", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -48,6 +47,8 @@ askama = "0.12"
 sha2 = "0.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
+rust-embed = "8.0"
+mime_guess = "2.0"
 
 [dev-dependencies]
 tempfile = "3"

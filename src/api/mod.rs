@@ -1,5 +1,6 @@
 mod certificates;
 mod handlers;
+mod static_assets;
 mod types;
 
 pub(crate) use certificates::persist_certificate;
@@ -15,7 +16,6 @@ use rustls::ServerConfig;
 use std::sync::{Arc, OnceLock, RwLock};
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
-use tower_http::services::ServeDir;
 use tracing::dispatcher;
 use tracing::{debug, error};
 
@@ -164,12 +164,13 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
     let acme_routes =
         Router::new().route("/.well-known/acme-challenge/:token", get(acme_challenge));
 
-    // Static file serving
-    let static_service = ServeDir::new("static");
+    // Static file serving (embedded)
+    let static_routes = Router::new()
+        .route("/static/*path", get(static_assets::serve_static));
 
     Router::new()
         .nest("/api", api_routes)
-        .nest_service("/static", static_service)
+        .merge(static_routes)
         .merge(console_routes)
         .merge(logout_routes)
         .merge(acme_routes)
