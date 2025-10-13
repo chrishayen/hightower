@@ -18,6 +18,7 @@ pub struct HightowerConnection {
     endpoint_id: String,
     assigned_ip: String,
     token: String,
+    auth_token: String,
     endpoint: String,
     gateway_url: String,
     gateway_endpoint: SocketAddr,
@@ -128,7 +129,7 @@ impl HightowerConnection {
             if let Ok(Some(stored)) = storage.get_connection() {
                 info!(endpoint_id = %stored.endpoint_id, "Found stored connection, attempting to restore");
 
-                match Self::restore_from_stored(stored, storage.clone()).await {
+                match Self::restore_from_stored(stored, storage.clone(), auth_token.clone()).await {
                     Ok(conn) => {
                         info!(endpoint_id = %conn.endpoint_id, "Successfully restored connection from storage");
                         return Ok(conn);
@@ -241,6 +242,7 @@ impl HightowerConnection {
             endpoint_id: registration.endpoint_id,
             assigned_ip: registration.assigned_ip,
             token: registration.token,
+            auth_token: auth_token.to_string(),
             endpoint,
             gateway_url,
             gateway_endpoint,
@@ -253,6 +255,7 @@ impl HightowerConnection {
     async fn restore_from_stored(
         stored: StoredConnection,
         storage: ConnectionStorage,
+        auth_token: String,
     ) -> Result<Self, ClientError> {
         let endpoint = build_endpoint(&stored.gateway_url)?;
 
@@ -311,6 +314,7 @@ impl HightowerConnection {
             endpoint_id: stored.endpoint_id,
             assigned_ip: stored.assigned_ip,
             token: stored.token,
+            auth_token,
             endpoint,
             gateway_url: stored.gateway_url,
             gateway_endpoint,
@@ -385,12 +389,20 @@ impl HightowerConnection {
     pub async fn get_peer_info(&self, endpoint_id_or_ip: &str) -> Result<PeerInfo, ClientError> {
         debug!(peer = %endpoint_id_or_ip, "Fetching peer info from gateway");
 
-        // Query gateway API: GET /api/endpoints/{endpoint_id_or_ip}
-        let url = format!("{}/api/endpoints/{}", self.gateway_url.trim_end_matches('/'), endpoint_id_or_ip);
+        // Determine if input is an IP address or endpoint_id
+        let is_ip = endpoint_id_or_ip.parse::<std::net::IpAddr>().is_ok();
+
+        // Construct appropriate endpoint URL
+        let url = if is_ip {
+            format!("{}/api/endpoints/ip/{}", self.gateway_url.trim_end_matches('/'), endpoint_id_or_ip)
+        } else {
+            format!("{}/api/endpoints/id/{}", self.gateway_url.trim_end_matches('/'), endpoint_id_or_ip)
+        };
 
         let client = reqwest::Client::new();
         let response = client
             .get(&url)
+            .header("X-HT-Auth", &self.auth_token)
             .send()
             .await?;
 
@@ -402,8 +414,8 @@ impl HightowerConnection {
             })?;
 
             debug!(
-                endpoint_id = %peer_info.endpoint_id,
-                assigned_ip = %peer_info.assigned_ip,
+                endpoint_id = ?peer_info.endpoint_id,
+                assigned_ip = ?peer_info.assigned_ip,
                 "Retrieved peer info from gateway"
             );
 
@@ -455,19 +467,22 @@ impl HightowerConnection {
         // 3. Add peer to WireGuard (idempotent - safe to call multiple times)
         self.transport
             .connection()
-            .add_peer(peer_public_key, peer_info.endpoint)
+            .add_peer(peer_public_key, peer_info.endpoint())
             .await
             .map_err(|e| ClientError::Transport(format!("failed to add peer: {}", e)))?;
 
+        let endpoint_id = peer_info.endpoint_id.as_deref().unwrap_or("unknown");
+        let assigned_ip = peer_info.assigned_ip.as_deref().unwrap_or("unknown");
+
         debug!(
-            endpoint_id = %peer_info.endpoint_id,
-            peer_ip = %peer_info.assigned_ip,
+            endpoint_id = %endpoint_id,
+            peer_ip = %assigned_ip,
             port = port,
             "Added peer and connecting"
         );
 
         // 4. Connect using the peer's assigned IP on the WireGuard network
-        let peer_addr: SocketAddr = format!("{}:{}", peer_info.assigned_ip, port)
+        let peer_addr: SocketAddr = format!("{}:{}", assigned_ip, port)
             .parse()
             .map_err(|e| ClientError::Transport(format!("invalid peer address: {}", e)))?;
 
@@ -479,7 +494,7 @@ impl HightowerConnection {
             .map_err(|e| ClientError::Transport(format!("failed to connect to peer: {}", e)))?;
 
         debug!(
-            endpoint_id = %peer_info.endpoint_id,
+            endpoint_id = %endpoint_id,
             addr = %peer_addr,
             "Successfully connected to peer"
         );
@@ -632,17 +647,17 @@ mod tests {
         // Test that the endpoint URL format for get_peer_info is correct
         let gateway_url = "http://gateway.example.com:8008";
         let endpoint_id = "ht-festive-penguin-abc123";
-        let expected_url = format!("{}/api/endpoints/{}", gateway_url, endpoint_id);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/ht-festive-penguin-abc123");
+        let expected_url = format!("{}/api/endpoints/id/{}", gateway_url, endpoint_id);
+        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123");
 
         // Test with IP address
         let ip = "100.64.0.5";
-        let expected_url = format!("{}/api/endpoints/{}", gateway_url, ip);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/100.64.0.5");
+        let expected_url = format!("{}/api/endpoints/ip/{}", gateway_url, ip);
+        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/ip/100.64.0.5");
 
         // Test with trailing slash in gateway URL
         let gateway_url = "http://gateway.example.com:8008/";
-        let expected_url = format!("{}/api/endpoints/{}", gateway_url.trim_end_matches('/'), endpoint_id);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/ht-festive-penguin-abc123");
+        let expected_url = format!("{}/api/endpoints/id/{}", gateway_url.trim_end_matches('/'), endpoint_id);
+        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123");
     }
 }

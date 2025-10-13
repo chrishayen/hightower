@@ -28,10 +28,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match connection.get_peer_info(&peer_endpoint).await {
         Ok(peer_info) => {
             println!("   ✓ Peer info retrieved:");
-            println!("     Endpoint ID: {}", peer_info.endpoint_id);
-            println!("     Assigned IP: {}", peer_info.assigned_ip);
+            println!("     Endpoint ID: {}", peer_info.endpoint_id.as_deref().unwrap_or("unknown"));
+            println!("     Assigned IP: {}", peer_info.assigned_ip.as_deref().unwrap_or("unknown"));
             println!("     Public Key: {}...", &peer_info.public_key_hex[..16]);
-            if let Some(endpoint) = peer_info.endpoint {
+            if let Some(endpoint) = peer_info.endpoint() {
                 println!("     Public Endpoint: {}", endpoint);
             } else {
                 println!("     Public Endpoint: None (may be behind NAT)");
