@@ -15,7 +15,7 @@ This library provides a complete solution for connecting to Hightower gateways. 
 - **Connection persistence and automatic restoration**
 
 **You only provide:** gateway URL and auth token
-**You get:** a working transport, node ID, and assigned IP
+**You get:** a working transport, endpoint ID, and assigned IP
 
 Everything else is handled automatically!
 
@@ -24,10 +24,44 @@ Everything else is handled automatically!
 By default, connections are automatically persisted to `~/.hightower/gateway/<gateway>/`. When you reconnect to the same gateway:
 - The library reuses your stored WireGuard keys (same identity)
 - No re-registration needed with the gateway
-- Same node ID across application restarts
+- Same endpoint ID across application restarts
 - Only `disconnect()` removes the stored connection
 
 This makes your application's network identity stable across restarts!
+
+### Peer-to-Peer Connectivity
+
+Connect to other endpoints on the Hightower network by their endpoint ID or assigned IP:
+
+```rust
+use hightower_client::HightowerConnection;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let connection = HightowerConnection::connect(
+        "https://gateway.example.com:8443",
+        "your-auth-token"
+    ).await?;
+
+    // Connect to another endpoint by ID or IP
+    let mut stream = connection.dial("ht-festive-penguin-abc123", 8080).await?;
+
+    // Send data to the peer
+    stream.send(b"Hello, peer!").await?;
+
+    // Receive response
+    let response = stream.recv().await?;
+    println!("Received: {}", String::from_utf8_lossy(&response));
+
+    connection.disconnect().await?;
+    Ok(())
+}
+```
+
+The `dial()` method automatically:
+1. Queries the gateway for the peer's real IP and public key
+2. Adds the peer to your WireGuard configuration
+3. Establishes a secure connection
 
 ## Installation
 
@@ -51,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = HightowerConnection::connect_with_auth_token("your-auth-token").await?;
 
     // Access what you need
-    println!("Node ID: {}", connection.node_id());
+    println!("Endpoint ID: {}", connection.endpoint_id());
     println!("Assigned IP: {}", connection.assigned_ip());
 
     // Get transport for communication
@@ -81,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "your-auth-token"
     ).await?;
 
-    println!("Connected to {}", connection.node_id());
+    println!("Connected to {}", connection.endpoint_id());
 
     connection.disconnect().await?;
 
@@ -136,6 +170,15 @@ export HT_AUTH_TOKEN="your-token"
 cargo run --example simple_deregister
 ```
 
+### Peer-to-Peer Connection
+```bash
+export HT_AUTH_TOKEN="your-token"
+export PEER_ENDPOINT="ht-festive-penguin-abc123"  # or use an IP like "100.64.0.5"
+cargo run --example peer_to_peer
+```
+
+Demonstrates connecting to another endpoint on the network.
+
 ## API Documentation
 
 ### `HightowerConnection`
@@ -179,9 +222,9 @@ The main connection struct with integrated WireGuard transport.
 
   Forces a fresh registration even if a stored connection exists. Deletes any existing stored connection for this gateway.
 
-- `fn node_id(&self) -> &str`
+- `fn endpoint_id(&self) -> &str`
 
-  Returns the node ID assigned by the gateway.
+  Returns the endpoint ID assigned by the gateway.
 
 - `fn assigned_ip(&self) -> &str`
 
@@ -190,6 +233,35 @@ The main connection struct with integrated WireGuard transport.
 - `fn transport(&self) -> &TransportServer`
 
   Returns the transport for sending/receiving data.
+
+- `async fn get_peer_info(&self, endpoint_id_or_ip: &str) -> Result<PeerInfo, ClientError>`
+
+  Queries the gateway for information about another endpoint. Accepts either an endpoint ID (e.g., "ht-festive-penguin-abc123") or an assigned IP (e.g., "100.64.0.5").
+
+  Returns `PeerInfo` containing:
+  - `endpoint_id`: The endpoint's ID
+  - `public_key_hex`: The endpoint's WireGuard public key
+  - `assigned_ip`: The endpoint's virtual IP on the network
+  - `endpoint`: The endpoint's real public address (optional, for NAT traversal)
+
+- `async fn dial(&self, peer: &str, port: u16) -> Result<Stream, ClientError>`
+
+  Establishes a connection to another endpoint on the Hightower network.
+
+  **Parameters:**
+  - `peer`: Endpoint ID (e.g., "ht-festive-penguin") or assigned IP (e.g., "100.64.0.5")
+  - `port`: Port to connect to on the peer
+
+  This method automatically:
+  1. Fetches peer info from the gateway
+  2. Adds the peer to WireGuard configuration
+  3. Establishes a secure connection
+
+  Returns a `Stream` for bidirectional communication with the peer.
+
+- `async fn ping_gateway(&self) -> Result<(), ClientError>`
+
+  Pings the gateway over the WireGuard connection to verify connectivity.
 
 - `async fn disconnect(self) -> Result<(), ClientError>`
 

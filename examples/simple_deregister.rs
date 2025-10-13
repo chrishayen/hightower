@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let connection = HightowerConnection::connect_with_auth_token(auth_token).await?;
 
-    println!("Connected! Node ID: {}", connection.node_id());
+    println!("Connected! Endpoint ID: {}", connection.endpoint_id());
     println!("\nNow disconnecting (this will automatically deregister)...");
 
     // Disconnect handles deregistration automatically using internal token

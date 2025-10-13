@@ -10,7 +10,7 @@ const CONN_KEY: &[u8] = b"connection";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredConnection {
-    pub node_id: String,
+    pub endpoint_id: String,
     pub token: String,
     pub gateway_url: String,
     pub assigned_ip: String,
@@ -100,7 +100,7 @@ impl ConnectionStorage {
             .flush()
             .map_err(|e| ClientError::Storage(format!("failed to flush storage: {}", e)))?;
 
-        debug!(gateway_url = %conn.gateway_url, node_id = %conn.node_id, "Stored connection");
+        debug!(gateway_url = %conn.gateway_url, endpoint_id = %conn.endpoint_id, "Stored connection");
 
         Ok(())
     }
@@ -115,7 +115,7 @@ impl ConnectionStorage {
             Some(bytes) => {
                 let conn: StoredConnection = serde_json::from_slice(&bytes)
                     .map_err(|e| ClientError::Storage(format!("failed to deserialize connection: {}", e)))?;
-                debug!(gateway_url = %conn.gateway_url, node_id = %conn.node_id, "Retrieved stored connection");
+                debug!(gateway_url = %conn.gateway_url, endpoint_id = %conn.endpoint_id, "Retrieved stored connection");
                 Ok(Some(conn))
             }
             None => {
@@ -171,7 +171,7 @@ mod tests {
 
     fn create_test_connection() -> StoredConnection {
         StoredConnection {
-            node_id: "test-node-123".into(),
+            endpoint_id: "test-endpoint-123".into(),
             token: "test-token-456".into(),
             gateway_url: "http://127.0.0.1:8008".into(),
             assigned_ip: "10.0.0.5".into(),
@@ -211,7 +211,7 @@ mod tests {
             .unwrap()
             .expect("connection should exist");
 
-        assert_eq!(retrieved.node_id, conn.node_id);
+        assert_eq!(retrieved.endpoint_id, conn.endpoint_id);
         assert_eq!(retrieved.token, conn.token);
         assert_eq!(retrieved.gateway_url, conn.gateway_url);
         assert_eq!(retrieved.assigned_ip, conn.assigned_ip);
@@ -262,7 +262,7 @@ mod tests {
         let conn1 = create_test_connection();
         let mut conn2 = create_test_connection();
         conn2.gateway_url = "http://other-gateway:8008".into();
-        conn2.node_id = "other-node-789".into();
+        conn2.endpoint_id = "other-endpoint-789".into();
 
         // Create separate storage for each gateway
         let storage1 = ConnectionStorage::new(temp_dir.path().join("gateway1")).unwrap();
@@ -274,7 +274,7 @@ mod tests {
         let retrieved1 = storage1.get_connection().unwrap().unwrap();
         let retrieved2 = storage2.get_connection().unwrap().unwrap();
 
-        assert_eq!(retrieved1.node_id, "test-node-123");
-        assert_eq!(retrieved2.node_id, "other-node-789");
+        assert_eq!(retrieved1.endpoint_id, "test-endpoint-123");
+        assert_eq!(retrieved2.endpoint_id, "other-endpoint-789");
     }
 }

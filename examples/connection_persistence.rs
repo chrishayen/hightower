@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("1. First connection (will register and store credentials):");
     let conn1 = HightowerConnection::connect(&gateway_url, &auth_token).await?;
     println!("   ✓ Connected!");
-    println!("   Node ID: {}", conn1.node_id());
+    println!("   Endpoint ID: {}", conn1.endpoint_id());
     println!("   Assigned IP: {}", conn1.assigned_ip());
 
     // Keep connection alive for a moment
@@ -30,13 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(conn1);
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // Second connection - will restore from stored credentials (same node_id!)
+    // Second connection - will restore from stored credentials (same endpoint_id!)
     println!("\n3. Second connection (will restore from stored credentials):");
     let conn2 = HightowerConnection::connect(&gateway_url, &auth_token).await?;
     println!("   ✓ Connected!");
-    println!("   Node ID: {}", conn2.node_id());
+    println!("   Endpoint ID: {}", conn2.endpoint_id());
     println!("   Assigned IP: {}", conn2.assigned_ip());
-    println!("   (Notice the node_id is the same - we reused the stored connection!)");
+    println!("   (Notice the endpoint_id is the same - we reused the stored connection!)");
 
     // Keep connection alive
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -48,13 +48,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // Third connection - will register again (new node_id since we cleared storage)
+    // Third connection - will register again (new endpoint_id since we cleared storage)
     println!("\n5. Third connection (storage cleared, will register fresh):");
     let conn3 = HightowerConnection::connect(&gateway_url, &auth_token).await?;
     println!("   ✓ Connected!");
-    println!("   Node ID: {}", conn3.node_id());
+    println!("   Endpoint ID: {}", conn3.endpoint_id());
     println!("   Assigned IP: {}", conn3.assigned_ip());
-    println!("   (New node_id because we explicitly disconnected last time)");
+    println!("   (New endpoint_id because we explicitly disconnected last time)");
 
     // Clean up
     conn3.disconnect().await?;
@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Demo Complete ===");
     println!("\nKey takeaways:");
     println!("- Connections persist across application restarts by default");
-    println!("- Same WireGuard keys = same identity = same node_id");
+    println!("- Same WireGuard keys = same identity = same endpoint_id");
     println!("- Only disconnect() removes stored credentials");
     println!("- Use connect_ephemeral() if you don't want persistence");
 

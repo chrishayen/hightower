@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Mode 1: Default - uses ~/.hightower/gateway/<gateway>/
     println!("1. Default mode (persistent storage):");
     let conn1 = HightowerConnection::connect(&gateway_url, &auth_token).await?;
-    println!("   Node ID: {}", conn1.node_id());
+    println!("   Endpoint ID: {}", conn1.endpoint_id());
     println!("   Storage: ~/.hightower/gateway/<sanitized-gateway>/");
     conn1.disconnect().await?;
 
@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &gateway_url,
         &auth_token
     ).await?;
-    println!("   Node ID: {}", conn2.node_id());
+    println!("   Endpoint ID: {}", conn2.endpoint_id());
     println!("   Storage: none (ephemeral)");
     conn2.disconnect().await?;
 
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &auth_token,
         &custom_dir
     ).await?;
-    println!("   Node ID: {}", conn3.node_id());
+    println!("   Endpoint ID: {}", conn3.endpoint_id());
     println!("   Storage: {}", custom_dir.display());
     conn3.disconnect().await?;
 
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &gateway_url,
         &auth_token
     ).await?;
-    println!("   Node ID: {}", conn4.node_id());
+    println!("   Endpoint ID: {}", conn4.endpoint_id());
     println!("   (This is a brand new registration even if one was stored)");
     conn4.disconnect().await?;
 

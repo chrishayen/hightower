@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = HightowerConnection::connect(gateway_url, auth_token).await?;
 
     println!("\nConnection successful!");
-    println!("  Node ID: {}", connection.node_id());
+    println!("  Endpoint ID: {}", connection.endpoint_id());
     println!("  Assigned IP: {}", connection.assigned_ip());
 
     println!("\nTransport ready for communication");

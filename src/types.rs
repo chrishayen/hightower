@@ -12,8 +12,8 @@ pub struct NetworkInfo {
 /// Information about a peer in the network
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
-    /// Node ID (e.g., "ht-festive-penguin-abc123")
-    pub node_id: String,
+    /// Endpoint ID (e.g., "ht-festive-penguin-abc123")
+    pub endpoint_id: String,
     /// WireGuard public key (hex encoded)
     pub public_key_hex: String,
     /// Assigned IP on the WireGuard network (e.g., "100.64.0.5")
@@ -38,7 +38,7 @@ pub(crate) struct RegistrationRequest<'a> {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct RegistrationResponse {
-    pub node_id: String,
+    pub endpoint_id: String,
     pub token: String,
     pub gateway_public_key_hex: String,
     pub assigned_ip: String,
