@@ -1,0 +1,28 @@
+{% if endpoints.len() == 0 %}
+<p class="dashboard-empty">No endpoints registered yet.</p>
+{% else %}
+<table class="dashboard-table">
+  <thead>
+    <tr>
+      <th>Endpoint ID</th>
+      <th>Assigned IP</th>
+      <th>Public IP</th>
+      <th>Public Port</th>
+      <th>Local IP</th>
+      <th>Local Port</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for endpoint in endpoints %}
+    <tr>
+      <td>{% match endpoint.endpoint_id %}{% when Some with (id) %}{{ id }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.assigned_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.public_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.public_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.local_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.local_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

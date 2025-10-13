@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hightower · Settings</title>
+  <meta name="description" content="Configure Hightower gateway settings.">
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js" defer></script>
+</head>
+<body>
+  <nav id="side-menu" class="side-menu" aria-label="Main navigation">
+    <button class="menu-toggle" aria-label="Toggle menu" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7h14M3 13h14"/>
+      </svg>
+    </button>
+    <ul class="menu-items">
+      <li>
+        <a href="/dashboard" class="menu-item" data-page="dashboard">
+          <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="13" width="7" height="4" rx="1"/>
+            <rect x="13" y="3" width="4" height="14" rx="1"/>
+          </svg>
+          <span class="menu-label">Dashboard</span>
+        </a>
+      </li>
+      <li>
+        <a href="/nodes" class="menu-item" data-page="nodes">
+          <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="2"/>
+            <circle cx="4" cy="4" r="2"/>
+            <circle cx="16" cy="4" r="2"/>
+            <circle cx="4" cy="16" r="2"/>
+            <circle cx="16" cy="16" r="2"/>
+            <line x1="10" y1="8" x2="10" y2="4"/>
+            <line x1="8.5" y1="9" x2="5.5" y2="5.5"/>
+            <line x1="11.5" y1="9" x2="14.5" y2="5.5"/>
+            <line x1="8.5" y1="11" x2="5.5" y2="14.5"/>
+            <line x1="11.5" y1="11" x2="14.5" y2="14.5"/>
+          </svg>
+          <span class="menu-label">Nodes</span>
+        </a>
+      </li>
+      <li>
+        <a href="/settings" class="menu-item" data-page="settings">
+          <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="3"/>
+            <path d="M17 10c0-.6-.1-1.1-.2-1.6l1.4-1.1-1.5-2.6-1.8.7c-.7-.6-1.6-1-2.5-1.2V2h-3v2.2c-.9.2-1.8.6-2.5 1.2l-1.8-.7-1.5 2.6 1.4 1.1c-.1.5-.2 1-.2 1.6s.1 1.1.2 1.6l-1.4 1.1 1.5 2.6 1.8-.7c.7.6 1.6 1 2.5 1.2V18h3v-2.2c.9-.2 1.8-.6 2.5-1.2l1.8.7 1.5-2.6-1.4-1.1c.1-.5.2-1 .2-1.6z"/>
+          </svg>
+          <span class="menu-label">Settings</span>
+        </a>
+      </li>
+    </ul>
+    <div class="menu-footer">
+      <a href="/logout" class="menu-item" data-page="logout">
+        <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 3h4v14h-4M7 10h10M7 10l3-3M7 10l3 3"/>
+        </svg>
+        <span class="menu-label">Logout</span>
+      </a>
+    </div>
+  </nav>
+  <main class="dashboard-main">
+    <div class="page-header">
+      <h1>Settings</h1>
+      <p>Manage your account settings and preferences.</p>
+    </div>
+
+    <section class="content-section" aria-labelledby="settings-heading">
+      <div class="section-header">
+        <h2 id="settings-heading">Change Password</h2>
+      </div>
+      <div id="password-alert"></div>
+      <form
+        hx-post="/api/settings/password"
+        hx-ext="json-enc"
+        hx-target="#password-alert"
+        hx-swap="innerHTML"
+      >
+        <fieldset>
+          <label for="current_password">Current Password</label>
+          <input
+            type="password"
+            id="current_password"
+            name="current_password"
+            required
+            autocomplete="current-password"
+          />
+
+          <label for="new_password">New Password</label>
+          <input
+            type="password"
+            id="new_password"
+            name="new_password"
+            required
+            autocomplete="new-password"
+            minlength="8"
+          />
+
+          <button type="submit">Change Password</button>
+        </fieldset>
+      </form>
+    </section>
+  </main>
+  <script>
+  (function() {
+    const menu = document.getElementById('side-menu');
+    const toggle = document.querySelector('.menu-toggle');
+    const body = document.body;
+
+    const isExpanded = localStorage.getItem('menuExpanded') === 'true';
+    if (isExpanded) {
+      menu.classList.add('expanded');
+      body.classList.add('menu-expanded');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+
+    toggle.addEventListener('click', () => {
+      const nowExpanded = !menu.classList.contains('expanded');
+      menu.classList.toggle('expanded');
+      body.classList.toggle('menu-expanded');
+      toggle.setAttribute('aria-expanded', nowExpanded);
+      localStorage.setItem('menuExpanded', nowExpanded);
+    });
+
+    const currentPath = window.location.pathname;
+    document.querySelectorAll('.menu-item').forEach(item => {
+      const page = item.getAttribute('data-page');
+      if ((page === 'dashboard' && currentPath === '/dashboard') ||
+          (page === 'nodes' && currentPath === '/nodes') ||
+          (page === 'settings' && currentPath === '/settings')) {
+        item.classList.add('active');
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
