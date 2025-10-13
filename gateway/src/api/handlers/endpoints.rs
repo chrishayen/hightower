@@ -138,6 +138,66 @@ pub(crate) async fn deregister_endpoint(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub(crate) async fn get_endpoint_by_id(
+    State(state): State<ApiState>,
+    AxumPath(endpoint_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<EndpointRegistrationRequest>, RootApiError> {
+    let kv = {
+        let guard = state.kv.read().expect("gateway shared kv read lock");
+        guard.clone()
+    };
+
+    validate_auth(&kv, &headers)?;
+
+    let registration_key = registration_storage_key(&endpoint_id);
+    let data = kv
+        .get_bytes(&registration_key)
+        .map_err(|err| RootApiError::Storage(format!("failed to read endpoint: {}", err)))?
+        .ok_or(RootApiError::NotFound)?;
+
+    if data == b"__DELETED__" {
+        return Err(RootApiError::NotFound);
+    }
+
+    let endpoint: EndpointRegistrationRequest = serde_json::from_slice(&data)
+        .map_err(|err| RootApiError::Internal(format!("failed to decode endpoint: {}", err)))?;
+
+    Ok(Json(endpoint))
+}
+
+pub(crate) async fn get_endpoint_by_ip(
+    State(state): State<ApiState>,
+    AxumPath(assigned_ip): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<EndpointRegistrationRequest>, RootApiError> {
+    let kv = {
+        let guard = state.kv.read().expect("gateway shared kv read lock");
+        guard.clone()
+    };
+
+    validate_auth(&kv, &headers)?;
+
+    let entries = kv
+        .list_by_prefix(ENDPOINT_REGISTRATION_PREFIX.as_bytes())
+        .map_err(|err| RootApiError::Storage(format!("failed to list endpoints: {}", err)))?;
+
+    for (_key, value) in entries {
+        if value == b"__DELETED__" {
+            continue;
+        }
+
+        let endpoint: EndpointRegistrationRequest = serde_json::from_slice(&value)
+            .map_err(|err| RootApiError::Internal(format!("failed to decode endpoint: {}", err)))?;
+
+        if endpoint.assigned_ip.as_deref() == Some(assigned_ip.as_str()) {
+            return Ok(Json(endpoint));
+        }
+    }
+
+    Err(RootApiError::NotFound)
+}
+
 async fn disconnect_wireguard_peer(endpoint_id: &str, key_hex: &str) {
     let Some(transport) = crate::wireguard_api::get_transport_server() else {
         return;
@@ -383,5 +443,189 @@ mod tests {
             .expect("deregistration succeeds");
 
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_id_returns_endpoint_when_authenticated() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_lowercase(AUTH_HEADER.as_bytes()).expect("static header"),
+            HeaderValue::from_static("super-secret"),
+        );
+
+        let body = EndpointRegistrationRequest {
+            endpoint_id: None,
+            public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
+            token: None,
+            assigned_ip: None,
+            public_ip: None,
+            public_port: None,
+            local_ip: None,
+            local_port: None,
+        };
+
+        let response = register_endpoint(State(state.clone()), headers.clone(), Json(body.clone()))
+            .await
+            .expect("registration succeeds");
+
+        let endpoint_id = response.0.endpoint_id.clone();
+        let assigned_ip = response.0.assigned_ip.clone();
+
+        let get_response = get_endpoint_by_id(State(state), AxumPath(endpoint_id.clone()), headers)
+            .await
+            .expect("get endpoint by id succeeds");
+
+        assert_eq!(get_response.0.endpoint_id, Some(endpoint_id));
+        assert_eq!(get_response.0.public_key_hex, body.public_key_hex);
+        assert_eq!(get_response.0.assigned_ip, Some(assigned_ip));
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_id_returns_not_found_for_nonexistent() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_lowercase(AUTH_HEADER.as_bytes()).expect("static header"),
+            HeaderValue::from_static("super-secret"),
+        );
+
+        let response = get_endpoint_by_id(State(state), AxumPath("nonexistent".into()), headers).await;
+        assert!(matches!(response, Err(RootApiError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_ip_returns_endpoint_when_authenticated() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_lowercase(AUTH_HEADER.as_bytes()).expect("static header"),
+            HeaderValue::from_static("super-secret"),
+        );
+
+        let body = EndpointRegistrationRequest {
+            endpoint_id: None,
+            public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
+            token: None,
+            assigned_ip: None,
+            public_ip: None,
+            public_port: None,
+            local_ip: None,
+            local_port: None,
+        };
+
+        let response = register_endpoint(State(state.clone()), headers.clone(), Json(body.clone()))
+            .await
+            .expect("registration succeeds");
+
+        let endpoint_id = response.0.endpoint_id.clone();
+        let assigned_ip = response.0.assigned_ip.clone();
+
+        let get_response = get_endpoint_by_ip(State(state), AxumPath(assigned_ip.clone()), headers)
+            .await
+            .expect("get endpoint by ip succeeds");
+
+        assert_eq!(get_response.0.endpoint_id, Some(endpoint_id));
+        assert_eq!(get_response.0.public_key_hex, body.public_key_hex);
+        assert_eq!(get_response.0.assigned_ip, Some(assigned_ip));
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_ip_returns_not_found_for_nonexistent() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_lowercase(AUTH_HEADER.as_bytes()).expect("static header"),
+            HeaderValue::from_static("super-secret"),
+        );
+
+        let response = get_endpoint_by_ip(State(state), AxumPath("10.0.0.99".into()), headers).await;
+        assert!(matches!(response, Err(RootApiError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_id_rejects_missing_auth() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let headers = HeaderMap::new();
+
+        let response = get_endpoint_by_id(State(state), AxumPath("some-id".into()), headers).await;
+        assert!(matches!(response, Err(RootApiError::Unauthorized)));
+    }
+
+    #[tokio::test]
+    async fn get_endpoint_by_ip_rejects_missing_auth() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        store_legacy_key(&context.kv, "super-secret").expect("store auth key");
+
+        let certificate = crate::startup::startup();
+        persist_certificate(&context, &certificate);
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+        let headers = HeaderMap::new();
+
+        let response = get_endpoint_by_ip(State(state), AxumPath("10.0.0.1".into()), headers).await;
+        assert!(matches!(response, Err(RootApiError::Unauthorized)));
     }
 }

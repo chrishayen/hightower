@@ -22,7 +22,8 @@ use tracing::{debug, error};
 use handlers::{
     acme_challenge, change_password, console_dashboard, console_endpoints, console_root, console_settings,
     create_session, dashboard_endpoints, deregister_endpoint, delete_session, generate_auth_key,
-    list_auth_keys, register_endpoint, revoke_auth_key, root_health, store_legacy_key,
+    get_endpoint_by_id, get_endpoint_by_ip, list_auth_keys, register_endpoint, revoke_auth_key,
+    root_health, store_legacy_key,
 };
 use types::ApiState;
 
@@ -145,6 +146,8 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/health", get(root_health))
         .route("/endpoints", post(register_endpoint))
         .route("/endpoints/:token", axum::routing::delete(deregister_endpoint))
+        .route("/endpoints/id/:endpoint_id", get(get_endpoint_by_id))
+        .route("/endpoints/ip/:assigned_ip", get(get_endpoint_by_ip))
         .route("/session", post(create_session))
         .route("/dashboard/endpoints", get(dashboard_endpoints))
         .route("/auth/keys", post(generate_auth_key).get(list_auth_keys))

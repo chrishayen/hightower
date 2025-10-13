@@ -106,6 +106,7 @@ impl IntoResponse for SessionApiError {
 pub(crate) enum RootApiError {
     Unauthorized,
     InvalidPublicKey,
+    NotFound,
     Storage(String),
     Internal(String),
 }
@@ -118,6 +119,9 @@ impl IntoResponse for RootApiError {
             }
             RootApiError::InvalidPublicKey => {
                 (StatusCode::BAD_REQUEST, "invalid public key").into_response()
+            }
+            RootApiError::NotFound => {
+                StatusCode::NOT_FOUND.into_response()
             }
             RootApiError::Storage(message) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
