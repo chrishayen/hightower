@@ -1,4 +1,4 @@
-use client::HightowerConnection;
+use hightower_client::HightowerConnection;
 use std::time::Duration;
 
 #[tokio::main]

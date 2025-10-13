@@ -1,7 +1,7 @@
 // This example demonstrates that deregistration is now automatic.
 // Simply call connection.disconnect() and the library handles deregistration internally.
 
-use client::HightowerConnection;
+use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

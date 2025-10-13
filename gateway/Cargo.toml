@@ -1,5 +1,5 @@
 [package]
-name = "gateway"
+name = "hightower-gateway"
 version = "0.1.7"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
@@ -20,9 +20,9 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.13", features = ["derive"] }
 ctrlc = "3"
-wireguard = { path = "../wireguard", features = ["transport"] }
-kv = { path = "../kv" }
-naming = { path = "../naming" }
+wireguard = { package = "hightower-wireguard", path = "../wireguard", features = ["transport"] }
+kv = { package = "hightower-kv", path = "../kv" }
+naming = { package = "hightower-naming", path = "../naming" }
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 hyper = { version = "1.7", features = ["server", "http1"] }

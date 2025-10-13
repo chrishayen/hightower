@@ -1,5 +1,5 @@
 [package]
-name = "node"
+name = "hightower-node"
 version = "0.1.2"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
@@ -16,8 +16,8 @@ name = "ht-node"
 path = "src/main.rs"
 
 [dependencies]
-client = { path = "../client" }
-kv = { path = "../kv" }
+client = { package = "hightower-client", path = "../client" }
+kv = { package = "hightower-kv", path = "../kv" }
 rand = "0.8"
 tempfile = "3"
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "signal"] }

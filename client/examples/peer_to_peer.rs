@@ -1,4 +1,4 @@
-use client::HightowerConnection;
+use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,5 +1,5 @@
 [package]
-name = "cnet"
+name = "hightower-cnet"
 version = "0.1.0"
 edition = "2024"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/chrishayen/hightower"
 
 [dependencies]
-client = { path = "../client" }
+client = { package = "hightower-client", path = "../client" }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"

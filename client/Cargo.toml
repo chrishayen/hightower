@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "hightower-client"
 version = "0.1.5"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
@@ -23,9 +23,9 @@ exclude = [
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "charset", "http2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-wireguard = { path = "../wireguard", features = ["transport"] }
-stun = { path = "../stun" }
-kv = { path = "../kv" }
+wireguard = { package = "hightower-wireguard", path = "../wireguard", features = ["transport"] }
+stun = { package = "hightower-stun", path = "../stun" }
+kv = { package = "hightower-kv", path = "../kv" }
 hex = "0.4"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }

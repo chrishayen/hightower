@@ -433,7 +433,7 @@ impl HightowerConnection {
     ///
     /// # Example
     /// ```no_run
-    /// # async fn example(conn: &client::HightowerConnection) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(conn: &hightower_client::HightowerConnection) -> Result<(), Box<dyn std::error::Error>> {
     /// let connection = conn.dial("ht-festive-penguin-abc123", 8080).await?;
     /// connection.send(b"Hello, peer!").await?;
     /// # Ok(())
