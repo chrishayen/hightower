@@ -33,11 +33,31 @@ dev: ## Run the node in dev mode (clean data directory first)
 	HT_AUTH_KEY=$(HT_AUTH_KEY) \
 	HT_DEFAULT_USER=$(HT_DEFAULT_USER) \
 	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
+	HT_GATEWAY_URL=http://127.0.0.1:8008 \
+	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run
+
+.PHONY: prod
+prod: ## Run the node in prod mode (clean data directory, connect to gateway.shotgun.dev)
+	rm -rf ~/.hightower
+	HT_AUTH_KEY=ht_bcad807af02cb99e6cc9782cfce863ad09e3a15680bae8093fb69cc5fd152906 \
+	HT_DEFAULT_USER=$(HT_DEFAULT_USER) \
+	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
+	HT_GATEWAY_URL=https://gateway.shotgun.dev \
 	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run
 
 .PHONY: clean
 clean: ## Clean build artifacts
 	$(CARGO_BIN) clean
+
+.PHONY: use-local-client
+use-local-client: ## Switch hightower-client dependency to local path
+	@sed -i 's|^hightower-client = .*|hightower-client = { path = "../hightower-client" }|' Cargo.toml
+	@echo "Switched to local hightower-client at ../hightower-client"
+
+.PHONY: use-published-client
+use-published-client: ## Switch hightower-client dependency to published version
+	@sed -i 's|^hightower-client = .*|hightower-client = "0.1"|' Cargo.toml
+	@echo "Switched to published hightower-client (latest 0.1.x version)"
 
 .PHONY: help
 help: ## Show this help message
