@@ -1,6 +1,6 @@
 [package]
 name = "hightower-client"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
 description = "Hightower client library"
@@ -30,6 +30,7 @@ hex = "0.4"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 sha2 = "0.10"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3"

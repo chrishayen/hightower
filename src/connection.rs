@@ -233,9 +233,8 @@ impl HightowerConnection {
             }
         }
 
-        // Gateway WireGuard endpoint (hardcoded for now - could be returned by registration)
-        let gateway_endpoint: SocketAddr = "127.0.0.1:51820".parse()
-            .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
+        // Parse gateway WireGuard endpoint from the gateway URL
+        let gateway_endpoint = parse_gateway_wireguard_endpoint(&gateway_url).await?;
 
         Ok(Self {
             transport: TransportServer::new(connection),
@@ -304,9 +303,8 @@ impl HightowerConnection {
             warn!(error = ?e, "Failed to update last_connected timestamp");
         }
 
-        // Gateway WireGuard endpoint (hardcoded for now - could be stored)
-        let gateway_endpoint: SocketAddr = "127.0.0.1:51820".parse()
-            .map_err(|e| ClientError::Configuration(format!("invalid gateway endpoint: {}", e)))?;
+        // Parse gateway WireGuard endpoint from the gateway URL
+        let gateway_endpoint = parse_gateway_wireguard_endpoint(&stored.gateway_url).await?;
 
         Ok(Self {
             transport: TransportServer::new(connection),
@@ -538,6 +536,25 @@ fn build_endpoint(gateway_url: &str) -> Result<String, ClientError> {
         gateway_url.trim_end_matches('/'),
         API_PATH
     ))
+}
+
+async fn parse_gateway_wireguard_endpoint(gateway_url: &str) -> Result<SocketAddr, ClientError> {
+    let parsed_url = url::Url::parse(gateway_url)
+        .map_err(|e| ClientError::Configuration(format!("invalid gateway URL: {}", e)))?;
+
+    let host = parsed_url.host_str()
+        .ok_or_else(|| ClientError::Configuration("gateway URL has no host".into()))?;
+
+    // Construct WireGuard endpoint using the gateway's host and standard WireGuard port
+    let endpoint_str = format!("{}:51820", host);
+
+    // Use tokio's DNS resolution to handle both hostnames and IP addresses
+    let mut addrs = tokio::net::lookup_host(&endpoint_str)
+        .await
+        .map_err(|e| ClientError::Configuration(format!("failed to resolve gateway endpoint {}: {}", endpoint_str, e)))?;
+
+    addrs.next()
+        .ok_or_else(|| ClientError::Configuration(format!("no addresses found for gateway endpoint: {}", endpoint_str)))
 }
 
 async fn register_with_gateway(
