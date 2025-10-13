@@ -1,6 +1,8 @@
 services:
   hightower-cnet:
-    build: .
+    build:
+      context: ..
+      dockerfile: cnet/Dockerfile
     container_name: hightower-cnet
     cap_add:
       - NET_ADMIN

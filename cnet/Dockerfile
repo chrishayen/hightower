@@ -1,11 +1,20 @@
 FROM rust:1.90 as builder
 
-WORKDIR /usr/src/hightower-cnet
+WORKDIR /usr/src/hightower
 
 COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+COPY cnet ./cnet
+COPY client ./client
+COPY wireguard ./wireguard
+COPY stun ./stun
+COPY kv ./kv
+COPY cli ./cli
+COPY gateway ./gateway
+COPY mdns ./mdns
+COPY naming ./naming
+COPY node ./node
 
-RUN cargo build --release
+RUN cargo build --release --package hightower-cnet
 
 FROM debian:bookworm-slim
 
@@ -16,7 +25,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/src/hightower-cnet/target/release/hightower-cnet /usr/local/bin/hightower-cnet
+COPY --from=builder /usr/src/hightower/target/release/hightower-cnet /usr/local/bin/hightower-cnet
 
 ENV HT_GATEWAY_URL=http://127.0.0.1:8008 \
     HT_HEALTH_CHECK_INTERVAL=30
