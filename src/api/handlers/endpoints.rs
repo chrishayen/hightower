@@ -10,15 +10,15 @@ use crate::context::NamespacedKv;
 use crate::ip_allocator::IpAllocator;
 use super::super::certificates::load_gateway_public_key;
 use super::super::types::{
-    ApiState, NodeRegistrationRequest, NodeRegistrationResponse, RootApiError,
-    AUTH_HEADER, NODE_REGISTRATION_PREFIX, NODE_TOKEN_PREFIX,
+    ApiState, EndpointRegistrationRequest, EndpointRegistrationResponse, RootApiError,
+    AUTH_HEADER, ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
 };
 
-pub(crate) async fn register_node(
+pub(crate) async fn register_endpoint(
     State(state): State<ApiState>,
     headers: HeaderMap,
-    Json(body): Json<NodeRegistrationRequest>,
-) -> Result<Json<NodeRegistrationResponse>, RootApiError> {
+    Json(body): Json<EndpointRegistrationRequest>,
+) -> Result<Json<EndpointRegistrationResponse>, RootApiError> {
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
@@ -26,32 +26,32 @@ pub(crate) async fn register_node(
 
     validate_auth(&kv, &headers)?;
 
-    // Always generate node_id - nodes never provide their own name
-    let node_id = generate_node_name();
+    // Always generate endpoint_id - endpoints never provide their own name
+    let endpoint_id = generate_endpoint_name();
 
-    debug!(node_id = %node_id, "Gateway received node registration request");
+    debug!(endpoint_id = %endpoint_id, "Gateway received endpoint registration request");
     ensure_public_key_valid(&body.public_key_hex)?;
 
-    // Allocate IP address for the node
-    let assigned_ip = IpAllocator::allocate_ip(&kv, &node_id)
+    // Allocate IP address for the endpoint
+    let assigned_ip = IpAllocator::allocate_ip(&kv, &endpoint_id)
         .map_err(|err| RootApiError::Storage(format!("failed to allocate IP: {}", err)))?;
-    debug!(node_id = %node_id, assigned_ip = %assigned_ip, "Assigned IP to node");
+    debug!(endpoint_id = %endpoint_id, assigned_ip = %assigned_ip, "Assigned IP to endpoint");
 
     let gateway_public_key_hex = load_gateway_public_key(&kv)?;
     let token = generate_registration_token();
 
     // Store the assigned IP in the registration
     let mut registration = body.clone();
-    registration.node_id = Some(node_id.clone());
+    registration.endpoint_id = Some(endpoint_id.clone());
     registration.assigned_ip = Some(assigned_ip.clone());
 
     persist_registration(&kv, &registration, &token).map_err(|err| {
-        RootApiError::Storage(format!("failed to persist node registration: {}", err))
+        RootApiError::Storage(format!("failed to persist endpoint registration: {}", err))
     })?;
 
-    // Add node as peer to transport layer
+    // Add endpoint as peer to transport layer
     if let Some(transport) = crate::wireguard_api::get_transport_server() {
-        debug!(node_id = %node_id, "gateway: Adding node as WireGuard peer");
+        debug!(endpoint_id = %endpoint_id, "gateway: Adding endpoint as WireGuard peer");
         let peer_public_key = hex::decode(&body.public_key_hex)
             .map_err(|_| RootApiError::InvalidPublicKey)?;
         if peer_public_key.len() != 32 {
@@ -60,34 +60,34 @@ pub(crate) async fn register_node(
         let mut key_array = [0u8; 32];
         key_array.copy_from_slice(&peer_public_key);
 
-        // We don't know the node's endpoint yet - they'll connect to us
+        // We don't know the endpoint's network endpoint yet - they'll connect to us
         if let Err(e) = transport.add_peer(key_array, None).await {
             tracing::error!(
                 error = ?e,
-                node_id = %node_id,
-                "gateway: Failed to add node as WireGuard peer"
+                endpoint_id = %endpoint_id,
+                "gateway: Failed to add endpoint as WireGuard peer"
             );
         } else {
             debug!(
-                node_id = %node_id,
+                endpoint_id = %endpoint_id,
                 public_key = &body.public_key_hex[..8],
-                "gateway: Successfully added node as WireGuard peer"
+                "gateway: Successfully added endpoint as WireGuard peer"
             );
         }
     } else {
-        debug!(node_id = %node_id, "gateway: WireGuard transport not initialized yet");
+        debug!(endpoint_id = %endpoint_id, "gateway: WireGuard transport not initialized yet");
     }
 
-    debug!(node_id = %node_id, assigned_ip = %assigned_ip, "Registered node");
-    Ok(Json(NodeRegistrationResponse {
-        node_id,
+    debug!(endpoint_id = %endpoint_id, assigned_ip = %assigned_ip, "Registered endpoint");
+    Ok(Json(EndpointRegistrationResponse {
+        endpoint_id,
         token,
         gateway_public_key_hex,
         assigned_ip,
     }))
 }
 
-pub(crate) async fn deregister_node(
+pub(crate) async fn deregister_endpoint(
     State(state): State<ApiState>,
     AxumPath(token): AxumPath<String>,
 ) -> Result<StatusCode, RootApiError> {
@@ -97,17 +97,17 @@ pub(crate) async fn deregister_node(
     };
 
     let token_key = token_storage_key(&token);
-    let node_id = kv
+    let endpoint_id = kv
         .get_bytes(&token_key)
         .map_err(|err| RootApiError::Storage(format!("failed to read token: {}", err)))?
         .ok_or(RootApiError::Unauthorized)?;
 
-    let node_id = String::from_utf8(node_id)
-        .map_err(|_| RootApiError::Internal("invalid node_id encoding".into()))?;
+    let endpoint_id = String::from_utf8(endpoint_id)
+        .map_err(|_| RootApiError::Internal("invalid endpoint_id encoding".into()))?;
 
-    debug!(node_id = %node_id, "Gateway received node deregistration request");
+    debug!(endpoint_id = %endpoint_id, "Gateway received endpoint deregistration request");
 
-    let registration_key = registration_storage_key(&node_id);
+    let registration_key = registration_storage_key(&endpoint_id);
 
     // Load registration to get public key for WireGuard cleanup
     let public_key_hex = kv
@@ -115,14 +115,14 @@ pub(crate) async fn deregister_node(
         .ok()
         .flatten()
         .and_then(|data| {
-            serde_json::from_slice::<NodeRegistrationRequest>(&data)
+            serde_json::from_slice::<EndpointRegistrationRequest>(&data)
                 .ok()
                 .map(|reg| reg.public_key_hex)
         });
 
     // Disconnect WireGuard peer if available
     if let Some(key_hex) = public_key_hex {
-        disconnect_wireguard_peer(&node_id, &key_hex).await;
+        disconnect_wireguard_peer(&endpoint_id, &key_hex).await;
     }
 
     kv.put_bytes(&registration_key, b"__DELETED__")
@@ -131,14 +131,14 @@ pub(crate) async fn deregister_node(
     kv.put_bytes(&token_key, b"__DELETED__")
         .map_err(|err| RootApiError::Storage(format!("failed to mark token deleted: {}", err)))?;
 
-    IpAllocator::release_ip(&kv, &node_id)
+    IpAllocator::release_ip(&kv, &endpoint_id)
         .map_err(|err| RootApiError::Storage(format!("failed to release IP: {}", err)))?;
 
-    debug!(node_id = %node_id, "Deregistered node");
+    debug!(endpoint_id = %endpoint_id, "Deregistered endpoint");
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn disconnect_wireguard_peer(node_id: &str, key_hex: &str) {
+async fn disconnect_wireguard_peer(endpoint_id: &str, key_hex: &str) {
     let Some(transport) = crate::wireguard_api::get_transport_server() else {
         return;
     };
@@ -157,14 +157,14 @@ async fn disconnect_wireguard_peer(node_id: &str, key_hex: &str) {
     if let Err(e) = transport.disconnect(key_array).await {
         tracing::error!(
             error = ?e,
-            node_id = %node_id,
+            endpoint_id = %endpoint_id,
             "gateway: Failed to disconnect WireGuard peer"
         );
         return;
     }
 
     debug!(
-        node_id = %node_id,
+        endpoint_id = %endpoint_id,
         public_key = &key_hex[..8],
         "gateway: Successfully disconnected WireGuard peer"
     );
@@ -199,25 +199,25 @@ fn ensure_public_key_valid(public_key_hex: &str) -> Result<(), RootApiError> {
 
 pub(crate) fn persist_registration(
     kv: &NamespacedKv,
-    registration: &NodeRegistrationRequest,
+    registration: &EndpointRegistrationRequest,
     token: &str,
 ) -> Result<(), hightower_kv::Error> {
-    let node_id = registration.node_id.as_ref().expect("node_id must be set before persist");
-    let key = registration_storage_key(node_id);
+    let endpoint_id = registration.endpoint_id.as_ref().expect("endpoint_id must be set before persist");
+    let key = registration_storage_key(endpoint_id);
     let serialized = serde_json::to_vec(registration)
-        .expect("NodeRegistrationRequest serialization should not fail");
+        .expect("EndpointRegistrationRequest serialization should not fail");
     kv.put_bytes(&key, &serialized)?;
 
     let token_key = token_storage_key(token);
-    kv.put_bytes(&token_key, node_id.as_bytes())
+    kv.put_bytes(&token_key, endpoint_id.as_bytes())
 }
 
-pub(crate) fn registration_storage_key(node_id: &str) -> Vec<u8> {
-    format!("{}/{}", NODE_REGISTRATION_PREFIX, node_id).into_bytes()
+pub(crate) fn registration_storage_key(endpoint_id: &str) -> Vec<u8> {
+    format!("{}/{}", ENDPOINT_REGISTRATION_PREFIX, endpoint_id).into_bytes()
 }
 
 pub(crate) fn token_storage_key(token: &str) -> Vec<u8> {
-    format!("{}/{}", NODE_TOKEN_PREFIX, token).into_bytes()
+    format!("{}/{}", ENDPOINT_TOKEN_PREFIX, token).into_bytes()
 }
 
 fn generate_registration_token() -> String {
@@ -226,7 +226,7 @@ fn generate_registration_token() -> String {
     hex::encode(bytes)
 }
 
-fn generate_node_name() -> String {
+fn generate_endpoint_name() -> String {
     const PREFIX: &str = "ht";
     const SUFFIX_LEN: usize = 4;
     hightower_naming::generate_random_name_with_prefix(Some(PREFIX), Some(SUFFIX_LEN))
@@ -243,7 +243,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn register_node_persists_entry_when_authenticated() {
+    async fn register_endpoint_persists_entry_when_authenticated() {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
@@ -262,8 +262,8 @@ mod tests {
             HeaderValue::from_static("super-secret"),
         );
 
-        let body = NodeRegistrationRequest {
-            node_id: None,
+        let body = EndpointRegistrationRequest {
+            endpoint_id: None,
             public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
             token: None,
@@ -274,12 +274,12 @@ mod tests {
             local_port: None,
         };
 
-        let response = register_node(State(state), headers, Json(body.clone()))
+        let response = register_endpoint(State(state), headers, Json(body.clone()))
             .await
             .expect("registration succeeds");
 
-        assert!(!response.0.node_id.is_empty());
-        assert!(response.0.node_id.starts_with("ht-"));
+        assert!(!response.0.endpoint_id.is_empty());
+        assert!(response.0.endpoint_id.starts_with("ht-"));
         assert!(!response.0.token.is_empty());
         assert!(!response.0.gateway_public_key_hex.is_empty());
         assert_eq!(response.0.gateway_public_key_hex.len(), 64);
@@ -288,18 +288,18 @@ mod tests {
 
         let stored = context
             .kv
-            .get_bytes(registration_storage_key(&response.0.node_id).as_ref())
+            .get_bytes(registration_storage_key(&response.0.endpoint_id).as_ref())
             .expect("kv read")
             .expect("value present");
-        let decoded: NodeRegistrationRequest =
+        let decoded: EndpointRegistrationRequest =
             serde_json::from_slice(&stored).expect("deserialize");
 
-        assert_eq!(decoded.node_id, Some(response.0.node_id));
+        assert_eq!(decoded.endpoint_id, Some(response.0.endpoint_id));
         assert_eq!(decoded.public_key_hex, body.public_key_hex);
     }
 
     #[tokio::test]
-    async fn register_node_rejects_missing_auth() {
+    async fn register_endpoint_rejects_missing_auth() {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
@@ -313,8 +313,8 @@ mod tests {
             auth: Arc::clone(&context.auth),
         };
         let headers = HeaderMap::new();
-        let body = NodeRegistrationRequest {
-            node_id: None,
+        let body = EndpointRegistrationRequest {
+            endpoint_id: None,
             public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
             token: None,
@@ -325,12 +325,12 @@ mod tests {
             local_port: None,
         };
 
-        let response = register_node(State(state), headers, Json(body)).await;
+        let response = register_endpoint(State(state), headers, Json(body)).await;
         assert!(matches!(response, Err(RootApiError::Unauthorized)));
     }
 
     #[tokio::test]
-    async fn deregister_node_removes_registration() {
+    async fn deregister_endpoint_removes_registration() {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
@@ -349,8 +349,8 @@ mod tests {
             HeaderValue::from_static("super-secret"),
         );
 
-        let body = NodeRegistrationRequest {
-            node_id: None,
+        let body = EndpointRegistrationRequest {
+            endpoint_id: None,
             public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
             token: None,
@@ -361,13 +361,13 @@ mod tests {
             local_port: None,
         };
 
-        let response = register_node(State(state.clone()), headers, Json(body.clone()))
+        let response = register_endpoint(State(state.clone()), headers, Json(body.clone()))
             .await
             .expect("registration succeeds");
 
-        let node_id = response.0.node_id;
+        let endpoint_id = response.0.endpoint_id;
         let token = response.0.token;
-        assert!(!node_id.is_empty());
+        assert!(!endpoint_id.is_empty());
         assert!(!token.is_empty());
 
         // Verify token was stored
@@ -376,9 +376,9 @@ mod tests {
             .get_bytes(token_storage_key(&token).as_ref())
             .expect("kv read token before deregister")
             .expect("token should exist");
-        assert_eq!(token_before, node_id.as_bytes());
+        assert_eq!(token_before, endpoint_id.as_bytes());
 
-        let status = deregister_node(State(state), AxumPath(token))
+        let status = deregister_endpoint(State(state), AxumPath(token))
             .await
             .expect("deregistration succeeds");
 

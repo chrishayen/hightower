@@ -10,15 +10,15 @@ use tracing::error;
 
 use crate::context::NamespacedKv;
 use super::super::types::{
-    ApiState, NodeRegistrationRequest, NodesTableTemplate,
-    NODE_REGISTRATION_PREFIX, NODE_TOKEN_PREFIX,
+    ApiState, EndpointRegistrationRequest, EndpointsTableTemplate,
+    ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
 };
 use super::sessions::has_valid_session;
 
-pub(crate) async fn dashboard_nodes(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn dashboard_endpoints(State(state): State<ApiState>, headers: HeaderMap) -> Response {
     match has_valid_session(&state, &headers) {
-        Ok(true) => match fetch_registered_nodes(&state) {
-            Ok(nodes) => match render_nodes_partial(&nodes) {
+        Ok(true) => match fetch_registered_endpoints(&state) {
+            Ok(endpoints) => match render_endpoints_partial(&endpoints) {
                 Ok(markup) => match Response::builder()
                     .status(StatusCode::OK)
                     .header(CONTENT_TYPE, "text/html; charset=utf-8")
@@ -44,13 +44,13 @@ pub(crate) async fn dashboard_nodes(State(state): State<ApiState>, headers: Head
                 }
             },
             Err(err) => {
-                error!(?err, "Failed to fetch node registrations");
-                (StatusCode::INTERNAL_SERVER_ERROR, "failed to load nodes").into_response()
+                error!(?err, "Failed to fetch endpoint registrations");
+                (StatusCode::INTERNAL_SERVER_ERROR, "failed to load endpoints").into_response()
             }
         },
         Ok(false) => unauthorized_redirect(),
         Err(err) => {
-            error!(?err, "Failed to validate session for dashboard nodes");
+            error!(?err, "Failed to validate session for dashboard endpoints");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "failed to validate session",
@@ -60,8 +60,8 @@ pub(crate) async fn dashboard_nodes(State(state): State<ApiState>, headers: Head
     }
 }
 
-fn render_nodes_partial(nodes: &[NodeRegistrationRequest]) -> Result<String, askama::Error> {
-    let template = NodesTableTemplate { nodes };
+fn render_endpoints_partial(endpoints: &[EndpointRegistrationRequest]) -> Result<String, askama::Error> {
+    let template = EndpointsTableTemplate { endpoints };
     template.render()
 }
 
@@ -86,44 +86,44 @@ fn unauthorized_redirect() -> Response {
     }
 }
 
-fn fetch_registered_nodes(state: &ApiState) -> Result<Vec<NodeRegistrationRequest>, String> {
+fn fetch_registered_endpoints(state: &ApiState) -> Result<Vec<EndpointRegistrationRequest>, String> {
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
     };
 
     let entries = kv
-        .list_by_prefix(NODE_REGISTRATION_PREFIX.as_bytes())
-        .map_err(|err| format!("failed to read node registrations: {}", err))?;
+        .list_by_prefix(ENDPOINT_REGISTRATION_PREFIX.as_bytes())
+        .map_err(|err| format!("failed to read endpoint registrations: {}", err))?;
 
-    let mut nodes = Vec::new();
+    let mut endpoints = Vec::new();
     for (_key, value) in entries {
         if value == b"__DELETED__" {
             continue;
         }
-        let mut node: NodeRegistrationRequest = serde_json::from_slice(&value)
-            .map_err(|err| format!("failed to decode node registration: {}", err))?;
+        let mut endpoint: EndpointRegistrationRequest = serde_json::from_slice(&value)
+            .map_err(|err| format!("failed to decode endpoint registration: {}", err))?;
 
-        // Find the token for this node
-        if let Some(ref node_id) = node.node_id {
-            node.token = find_token_for_node(&kv, node_id);
+        // Find the token for this endpoint
+        if let Some(ref endpoint_id) = endpoint.endpoint_id {
+            endpoint.token = find_token_for_endpoint(&kv, endpoint_id);
         }
 
-        nodes.push(node);
+        endpoints.push(endpoint);
     }
 
-    nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
-    Ok(nodes)
+    endpoints.sort_by(|a, b| a.endpoint_id.cmp(&b.endpoint_id));
+    Ok(endpoints)
 }
 
-fn find_token_for_node(kv: &NamespacedKv, node_id: &str) -> Option<String> {
-    let token_entries = kv.list_by_prefix(NODE_TOKEN_PREFIX.as_bytes()).ok()?;
+fn find_token_for_endpoint(kv: &NamespacedKv, endpoint_id: &str) -> Option<String> {
+    let token_entries = kv.list_by_prefix(ENDPOINT_TOKEN_PREFIX.as_bytes()).ok()?;
 
     for (key, value) in token_entries {
         if value == b"__DELETED__" {
             continue;
         }
-        if value == node_id.as_bytes() {
+        if value == endpoint_id.as_bytes() {
             // The key returned by list_by_prefix has the prefix stripped already
             let token = String::from_utf8(key).ok()?;
             return Some(token);
@@ -137,7 +137,7 @@ fn find_token_for_node(kv: &NamespacedKv, node_id: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::context::{CommonContext, initialize_kv};
-    use crate::api::handlers::nodes::persist_registration;
+    use crate::api::handlers::endpoints::persist_registration;
     use crate::api::handlers::sessions::create_session;
     use crate::api::types::{SessionRequest, SESSION_COOKIE};
     use axum::{
@@ -148,7 +148,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn dashboard_lists_registered_nodes() {
+    async fn dashboard_lists_registered_endpoints() {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
@@ -164,8 +164,8 @@ mod tests {
             auth: Arc::clone(&context.auth),
         };
 
-        let registration = NodeRegistrationRequest {
-            node_id: Some("ht-node-1".into()),
+        let registration = EndpointRegistrationRequest {
+            endpoint_id: Some("ht-endpoint-1".into()),
             public_key_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
             token: None,
@@ -212,13 +212,13 @@ mod tests {
                 .expect("cookie header value"),
         );
 
-        let response = dashboard_nodes(State(state), headers).await;
+        let response = dashboard_endpoints(State(state), headers).await;
         assert_eq!(response.status(), StatusCode::OK);
 
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("read body");
         let rendered = String::from_utf8(body_bytes.into()).expect("body utf8");
-        assert!(rendered.contains("ht-node-1"));
+        assert!(rendered.contains("ht-endpoint-1"));
     }
 }

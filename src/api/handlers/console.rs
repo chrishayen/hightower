@@ -6,7 +6,7 @@ use axum::{
 };
 use tracing::error;
 
-use super::super::types::{ApiState, DashboardTemplate, LoginTemplate, NodesTemplate, SettingsTemplate};
+use super::super::types::{ApiState, DashboardTemplate, EndpointsTemplate, LoginTemplate, SettingsTemplate};
 use super::sessions::has_valid_session;
 
 pub(crate) async fn console_root() -> Response {
@@ -40,18 +40,18 @@ pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: He
     }
 }
 
-pub(crate) async fn console_nodes(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_endpoints(State(state): State<ApiState>, headers: HeaderMap) -> Response {
     match has_valid_session(&state, &headers) {
-        Ok(true) => match NodesTemplate.render() {
+        Ok(true) => match EndpointsTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
             Err(err) => {
-                error!(?err, "Failed to render nodes template");
+                error!(?err, "Failed to render endpoints template");
                 (StatusCode::INTERNAL_SERVER_ERROR, "failed to render page").into_response()
             }
         },
         Ok(false) => Redirect::to("/").into_response(),
         Err(err) => {
-            error!(?err, "Failed to validate session for nodes");
+            error!(?err, "Failed to validate session for endpoints");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "failed to validate session",
@@ -172,6 +172,6 @@ mod tests {
             .expect("read body");
         let rendered = String::from_utf8(body_bytes.into()).expect("body utf8");
         assert!(rendered.contains("Dashboard"));
-        assert!(rendered.contains("hx-get=\"/api/dashboard/nodes\""));
+        assert!(rendered.contains("hx-get=\"/api/dashboard/endpoints\""));
     }
 }

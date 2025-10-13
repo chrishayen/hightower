@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hightower · Nodes</title>
-  <meta name="description" content="Manage and configure nodes in the Hightower mesh.">
+  <title>Hightower · Endpoints</title>
+  <meta name="description" content="Manage and configure endpoints in the Hightower mesh.">
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
@@ -27,7 +27,7 @@
         </a>
       </li>
       <li>
-        <a href="/nodes" class="menu-item" data-page="nodes">
+        <a href="/endpoints" class="menu-item" data-page="endpoints">
           <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="10" cy="10" r="2"/>
             <circle cx="4" cy="4" r="2"/>
@@ -40,7 +40,7 @@
             <line x1="8.5" y1="11" x2="5.5" y2="14.5"/>
             <line x1="11.5" y1="11" x2="14.5" y2="14.5"/>
           </svg>
-          <span class="menu-label">Nodes</span>
+          <span class="menu-label">Endpoints</span>
         </a>
       </li>
       <li>
@@ -64,8 +64,8 @@
   </nav>
   <main class="dashboard-main">
     <div class="page-header">
-      <h1>Nodes</h1>
-      <p>Manage nodes and authentication keys for the mesh network.</p>
+      <h1>Endpoints</h1>
+      <p>Manage endpoints and authentication keys for the mesh network.</p>
     </div>
 
     <section class="content-section" aria-labelledby="auth-keys-heading">
@@ -102,17 +102,17 @@
       </div>
     </section>
 
-    <section class="content-section" aria-labelledby="nodes-heading">
+    <section class="content-section" aria-labelledby="endpoints-heading">
       <div class="section-header">
-        <h2 id="nodes-heading">Registered Nodes</h2>
+        <h2 id="endpoints-heading">Registered Endpoints</h2>
       </div>
       <div
-        id="node-list"
-        hx-get="/api/dashboard/nodes"
+        id="endpoint-list"
+        hx-get="/api/dashboard/endpoints"
         hx-trigger="load, every 10s"
         hx-swap="innerHTML"
       >
-        <p class="dashboard-empty">Loading nodes…</p>
+        <p class="dashboard-empty">Loading endpoints…</p>
       </div>
     </section>
   </main>
@@ -141,7 +141,7 @@
     document.querySelectorAll('.menu-item').forEach(item => {
       const page = item.getAttribute('data-page');
       if ((page === 'dashboard' && currentPath === '/dashboard') ||
-          (page === 'nodes' && currentPath === '/nodes') ||
+          (page === 'endpoints' && currentPath === '/endpoints') ||
           (page === 'settings' && currentPath === '/settings')) {
         item.classList.add('active');
       }

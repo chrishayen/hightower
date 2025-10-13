@@ -6,9 +6,8 @@ use axum::{
 use crate::context::{GatewayAuthService, NamespacedKv};
 use std::sync::{Arc, RwLock};
 
-// Backward compatibility constants (deprecated)
-pub(crate) const NODE_REGISTRATION_PREFIX: &str = "nodes/registry";
-pub(crate) const NODE_TOKEN_PREFIX: &str = "nodes/tokens";
+pub(crate) const ENDPOINT_REGISTRATION_PREFIX: &str = "endpoints/registry";
+pub(crate) const ENDPOINT_TOKEN_PREFIX: &str = "endpoints/tokens";
 pub(crate) const AUTH_HEADER: &str = "x-ht-auth";
 pub(crate) const SESSION_NAMESPACE: &[u8] = b"sessions";
 pub(crate) const SESSION_COOKIE: &str = "ht_session";
@@ -20,9 +19,9 @@ pub(crate) struct ApiState {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct NodeRegistrationRequest {
+pub(crate) struct EndpointRegistrationRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) node_id: Option<String>,
+    pub(crate) endpoint_id: Option<String>,
     pub(crate) public_key_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) token: Option<String>,
@@ -39,8 +38,8 @@ pub(crate) struct NodeRegistrationRequest {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct NodeRegistrationResponse {
-    pub(crate) node_id: String,
+pub(crate) struct EndpointRegistrationResponse {
+    pub(crate) endpoint_id: String,
     pub(crate) token: String,
     pub(crate) gateway_public_key_hex: String,
     pub(crate) assigned_ip: String,
@@ -55,8 +54,8 @@ pub(crate) struct LoginTemplate;
 pub(crate) struct DashboardTemplate;
 
 #[derive(Template)]
-#[template(path = "nodes.html")]
-pub(crate) struct NodesTemplate;
+#[template(path = "endpoints.html")]
+pub(crate) struct EndpointsTemplate;
 
 #[derive(Template)]
 #[template(path = "settings.html")]
@@ -71,8 +70,8 @@ pub(crate) struct LoginAlertTemplate<'a> {
 
 #[derive(Template)]
 #[template(path = "nodes_table.html")]
-pub(crate) struct NodesTableTemplate<'a> {
-    pub(crate) nodes: &'a [NodeRegistrationRequest],
+pub(crate) struct EndpointsTableTemplate<'a> {
+    pub(crate) endpoints: &'a [EndpointRegistrationRequest],
 }
 
 #[derive(Template)]

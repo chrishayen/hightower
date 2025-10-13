@@ -1,10 +1,10 @@
-{% if nodes.len() == 0 %}
-<p class="dashboard-empty">No nodes registered yet.</p>
+{% if endpoints.len() == 0 %}
+<p class="dashboard-empty">No endpoints registered yet.</p>
 {% else %}
 <table class="dashboard-table">
   <thead>
     <tr>
-      <th>Node ID</th>
+      <th>Endpoint ID</th>
       <th>Assigned IP</th>
       <th>Public IP</th>
       <th>Public Port</th>
@@ -13,14 +13,14 @@
     </tr>
   </thead>
   <tbody>
-    {% for node in nodes %}
+    {% for endpoint in endpoints %}
     <tr>
-      <td>{% match node.node_id %}{% when Some with (id) %}{{ id }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
-      <td>{% match node.assigned_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
-      <td>{% match node.public_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
-      <td>{% match node.public_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
-      <td>{% match node.local_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
-      <td>{% match node.local_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.endpoint_id %}{% when Some with (id) %}{{ id }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.assigned_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.public_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.public_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.local_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
+      <td>{% match endpoint.local_port %}{% when Some with (port) %}{{ port }}{% when None %}<span class="text-muted">—</span>{% endmatch %}</td>
     </tr>
     {% endfor %}
   </tbody>

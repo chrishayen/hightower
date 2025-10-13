@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hightower · Dashboard</title>
-  <meta name="description" content="Operational view of registered nodes within Hightower.">
+  <meta name="description" content="Operational view of registered endpoints within Hightower.">
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
 </head>
@@ -27,7 +27,7 @@
         </a>
       </li>
       <li>
-        <a href="/nodes" class="menu-item" data-page="nodes">
+        <a href="/endpoints" class="menu-item" data-page="endpoints">
           <svg class="menu-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="10" cy="10" r="2"/>
             <circle cx="4" cy="4" r="2"/>
@@ -40,7 +40,7 @@
             <line x1="8.5" y1="11" x2="5.5" y2="14.5"/>
             <line x1="11.5" y1="11" x2="14.5" y2="14.5"/>
           </svg>
-          <span class="menu-label">Nodes</span>
+          <span class="menu-label">Endpoints</span>
         </a>
       </li>
       <li>
@@ -65,20 +65,20 @@
   <main class="dashboard-main">
     <div class="page-header">
       <h1>Dashboard</h1>
-      <p>Monitor and manage registered nodes in the mesh network.</p>
+      <p>Monitor and manage registered endpoints in the mesh network.</p>
     </div>
 
     <section class="content-section" aria-labelledby="dashboard-heading">
       <div class="section-header">
-        <h2 id="dashboard-heading">Registered Nodes</h2>
+        <h2 id="dashboard-heading">Registered Endpoints</h2>
       </div>
       <div
-        id="node-list"
-        hx-get="/api/dashboard/nodes"
+        id="endpoint-list"
+        hx-get="/api/dashboard/endpoints"
         hx-trigger="load, every 10s"
         hx-swap="innerHTML"
       >
-        <p class="dashboard-empty">Loading node registrations…</p>
+        <p class="dashboard-empty">Loading endpoint registrations…</p>
       </div>
     </section>
   </main>
@@ -107,7 +107,7 @@
     document.querySelectorAll('.menu-item').forEach(item => {
       const page = item.getAttribute('data-page');
       if ((page === 'dashboard' && currentPath === '/dashboard') ||
-          (page === 'nodes' && currentPath === '/nodes') ||
+          (page === 'endpoints' && currentPath === '/endpoints') ||
           (page === 'settings' && currentPath === '/settings')) {
         item.classList.add('active');
       }

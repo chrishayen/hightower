@@ -81,8 +81,8 @@ async fn start_api_listener(server: &TransportServer) -> Result<(), Error> {
                                 if let Err(e) = stream.send(response).await {
                                     error!(error = ?e, "Failed to send response");
                                 }
-                            } else if request.contains("GET /peers/") {
-                                handle_peer_lookup(&request, &stream).await;
+                            } else if request.contains("GET /endpoints/") {
+                                handle_endpoint_lookup(&request, &stream).await;
                             } else {
                                 let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
                                 if let Err(e) = stream.send(response).await {
@@ -105,27 +105,27 @@ async fn start_api_listener(server: &TransportServer) -> Result<(), Error> {
     Ok(())
 }
 
-async fn handle_peer_lookup(request: &str, stream: &Stream) {
-    debug!("gateway: Handling peer lookup request");
+async fn handle_endpoint_lookup(request: &str, stream: &Stream) {
+    debug!("gateway: Handling endpoint lookup request");
 
-    // Extract node_id from request like "GET /peers/{node_id}"
-    let node_id = if let Some(start) = request.find("GET /peers/") {
-        let after_prefix = &request[start + 11..]; // Length of "GET /peers/"
+    // Extract identifier from request like "GET /endpoints/{ip_or_endpoint_id}"
+    let identifier = if let Some(start) = request.find("GET /endpoints/") {
+        let after_prefix = &request[start + 15..]; // Length of "GET /endpoints/"
         after_prefix.split_whitespace().next()
     } else {
         None
     };
 
-    let Some(node_id) = node_id else {
-        debug!("gateway: Bad peer lookup request - no node_id");
+    let Some(identifier) = identifier else {
+        debug!("gateway: Bad endpoint lookup request - no identifier");
         let response = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
         let _ = stream.send(response).await;
         return;
     };
 
-    debug!(node_id = node_id, "gateway: Looking up peer public key");
+    debug!(identifier = identifier, "gateway: Looking up endpoint");
 
-    // Load the peer's public key from KV storage
+    // Load the KV storage
     let Some(kv) = GATEWAY_KV.get() else {
         error!("Gateway KV not initialized");
         let response = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
@@ -133,17 +133,59 @@ async fn handle_peer_lookup(request: &str, stream: &Stream) {
         return;
     };
 
+    // Determine if identifier is an IP or endpoint_id, and look up the endpoint
+    let endpoint_id = {
+        let kv = kv.read().expect("gateway kv lock");
+
+        // Try to look up by IP first (check if it looks like an IP)
+        if identifier.contains('.') {
+            // Looks like an IP - look up endpoint_id from IP allocator
+            let ip_allocation_key = format!("ip_allocations/{}", identifier);
+            match kv.get_bytes(ip_allocation_key.as_bytes()) {
+                Ok(Some(data)) if data != b"__DELETED__" => {
+                    String::from_utf8(data).ok()
+                }
+                _ => None
+            }
+        } else {
+            // Assume it's an endpoint_id
+            Some(identifier.to_string())
+        }
+    };
+
+    let Some(endpoint_id) = endpoint_id else {
+        debug!(identifier = identifier, "gateway: Endpoint not found");
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        let _ = stream.send(response).await;
+        return;
+    };
+
     // Extract data and drop lock before any awaits
-    let registration_key = format!("nodes/registry/{}", node_id);
-    let public_key_hex = {
+    let registration_key = format!("endpoints/registry/{}", endpoint_id);
+    let endpoint_data = {
         let kv = kv.read().expect("gateway kv lock");
         match kv.get_bytes(registration_key.as_bytes()) {
             Ok(Some(data)) => {
                 match serde_json::from_slice::<serde_json::Value>(&data) {
                     Ok(registration) => {
-                        registration.get("public_key_hex")
+                        let public_key_hex = registration.get("public_key_hex")
                             .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
+                            .map(|s| s.to_string());
+                        let assigned_ip = registration.get("assigned_ip")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let public_ip = registration.get("public_ip")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let public_port = registration.get("public_port")
+                            .and_then(|v| v.as_u64());
+                        let local_ip = registration.get("local_ip")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let local_port = registration.get("local_port")
+                            .and_then(|v| v.as_u64());
+
+                        Some((public_key_hex, assigned_ip, public_ip, public_port, local_ip, local_port))
                     }
                     Err(e) => {
                         error!(error = ?e, "gateway: Failed to deserialize registration");
@@ -153,28 +195,48 @@ async fn handle_peer_lookup(request: &str, stream: &Stream) {
             }
             Ok(None) => None,
             Err(e) => {
-                error!(error = ?e, "gateway: Failed to query KV for node");
+                error!(error = ?e, "gateway: Failed to query KV for endpoint");
                 None
             }
         }
     }; // Lock dropped here
 
     // Now send response without holding the lock
-    match public_key_hex {
-        Some(key) => {
-            let response_body = format!(r#"{{"public_key_hex":"{}"}}"#, key);
+    match endpoint_data {
+        Some((Some(public_key_hex), assigned_ip, public_ip, public_port, local_ip, local_port)) => {
+            let mut response_body = format!(r#"{{"endpoint_id":"{}","public_key_hex":"{}""#,
+                endpoint_id, public_key_hex);
+
+            if let Some(ip) = assigned_ip {
+                response_body.push_str(&format!(r#","assigned_ip":"{}""#, ip));
+            }
+            if let Some(ip) = public_ip {
+                response_body.push_str(&format!(r#","public_ip":"{}""#, ip));
+            }
+            if let Some(port) = public_port {
+                response_body.push_str(&format!(r#","public_port":{}"#, port));
+            }
+            if let Some(ip) = local_ip {
+                response_body.push_str(&format!(r#","local_ip":"{}""#, ip));
+            }
+            if let Some(port) = local_port {
+                response_body.push_str(&format!(r#","local_port":{}"#, port));
+            }
+
+            response_body.push_str("}");
+
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                 response_body.len(),
                 response_body
             );
             if let Err(e) = stream.send(response.as_bytes()).await {
-                error!(error = ?e, "gateway: Failed to send peer lookup response");
+                error!(error = ?e, "gateway: Failed to send endpoint lookup response");
             } else {
-                debug!(node_id = node_id, "gateway: Sent peer public key");
+                debug!(endpoint_id = endpoint_id, "gateway: Sent endpoint information");
             }
         }
-        None => {
+        _ => {
             let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
             let _ = stream.send(response).await;
         }

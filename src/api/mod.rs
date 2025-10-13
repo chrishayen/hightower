@@ -20,9 +20,9 @@ use tracing::dispatcher;
 use tracing::{debug, error};
 
 use handlers::{
-    acme_challenge, change_password, console_dashboard, console_nodes, console_root, console_settings,
-    create_session, dashboard_nodes, deregister_node, delete_session, generate_auth_key,
-    list_auth_keys, register_node, revoke_auth_key, root_health, store_legacy_key,
+    acme_challenge, change_password, console_dashboard, console_endpoints, console_root, console_settings,
+    create_session, dashboard_endpoints, deregister_endpoint, delete_session, generate_auth_key,
+    list_auth_keys, register_endpoint, revoke_auth_key, root_health, store_legacy_key,
 };
 use types::ApiState;
 
@@ -143,10 +143,10 @@ pub fn start_with_email(context: &CommonContext, email: Option<String>) {
 fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthService>) -> Router {
     let api_routes = Router::new()
         .route("/health", get(root_health))
-        .route("/nodes", post(register_node))
-        .route("/nodes/:token", axum::routing::delete(deregister_node))
+        .route("/endpoints", post(register_endpoint))
+        .route("/endpoints/:token", axum::routing::delete(deregister_endpoint))
         .route("/session", post(create_session))
-        .route("/dashboard/nodes", get(dashboard_nodes))
+        .route("/dashboard/endpoints", get(dashboard_endpoints))
         .route("/auth/keys", post(generate_auth_key).get(list_auth_keys))
         .route("/auth/keys/:key_id", axum::routing::delete(revoke_auth_key))
         .route("/settings/password", post(change_password));
@@ -157,7 +157,7 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
     let console_routes = Router::new()
         .route("/", get(console_root))
         .route("/dashboard", get(console_dashboard))
-        .route("/nodes", get(console_nodes))
+        .route("/endpoints", get(console_endpoints))
         .route("/settings", get(console_settings));
 
     // ACME HTTP-01 challenge handler
@@ -356,10 +356,10 @@ mod tests {
     use crate::client::RootRegistrar;
     use crate::context::{initialize_kv, CommonContext, HT_AUTH_KEY};
     use crate::fixtures;
-    use handlers::nodes::registration_storage_key;
+    use handlers::endpoints::registration_storage_key;
     use std::sync::mpsc;
     use tempfile::TempDir;
-    use types::NodeRegistrationRequest;
+    use types::EndpointRegistrationRequest;
 
     #[test]
     fn start_initializes_server() {
@@ -423,7 +423,7 @@ mod tests {
         });
 
         let addr = ready_rx.recv().expect("receive listener address");
-        let endpoint = format!("http://{addr}/api/nodes");
+        let endpoint = format!("http://{addr}/api/endpoints");
         context
             .kv
             .put_bytes(crate::client::ROOT_ENDPOINT_KEY, endpoint.as_bytes())
@@ -436,19 +436,19 @@ mod tests {
             .register(&context, public_key_hex, None)
             .expect("http registrar registers against api");
 
-        // Gateway should have assigned a node_id (for now, still accepts the old one)
-        let assigned_node_id = result.node_id;
-        assert!(!assigned_node_id.is_empty());
+        // Gateway should have assigned an endpoint_id
+        let assigned_endpoint_id = result.endpoint_id;
+        assert!(!assigned_endpoint_id.is_empty());
 
-        let key = registration_storage_key(&assigned_node_id);
+        let key = registration_storage_key(&assigned_endpoint_id);
         let stored = context
             .kv
             .get_bytes(key.as_ref())
             .expect("kv read")
             .expect("registration stored");
-        let decoded: NodeRegistrationRequest =
+        let decoded: EndpointRegistrationRequest =
             serde_json::from_slice(&stored).expect("decode registration");
-        assert_eq!(decoded.node_id, Some(assigned_node_id));
+        assert_eq!(decoded.endpoint_id, Some(assigned_endpoint_id));
         assert_eq!(decoded.public_key_hex, public_key_hex);
 
         shutdown_tx.send(()).expect("shutdown api server");

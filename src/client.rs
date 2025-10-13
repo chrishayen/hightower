@@ -7,12 +7,12 @@ use std::fmt;
 use std::time::Duration;
 use tracing::debug;
 
-const DEFAULT_ROOT_ENDPOINT: &str = "http://127.0.0.1:8008/api/nodes";
+const DEFAULT_ROOT_ENDPOINT: &str = "http://127.0.0.1:8008/api/endpoints";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ROOT_ENDPOINT_KEY: &[u8] = b"config/root_api";
 
 pub struct RegistrationResult {
-    pub node_id: String,
+    pub endpoint_id: String,
     pub token: String,
     pub gateway_public_key_hex: String,
     pub assigned_ip: String,
@@ -70,8 +70,8 @@ struct NodeRegistrationPayload<'a> {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct NodeRegistrationResponse {
-    node_id: String,
+struct EndpointRegistrationResponse {
+    endpoint_id: String,
     token: String,
     gateway_public_key_hex: String,
     assigned_ip: String,
@@ -98,7 +98,7 @@ impl RootRegistrar for HttpRootRegistrar {
         if registration_disabled() {
             debug!("Skipping root registration (disabled)");
             return Ok(RegistrationResult {
-                node_id: String::new(),
+                endpoint_id: String::new(),
                 token: String::new(),
                 gateway_public_key_hex: String::new(),
                 assigned_ip: String::new(),
@@ -124,12 +124,12 @@ impl RootRegistrar for HttpRootRegistrar {
             .map_err(RootRegistrationError::Request)?;
 
         if response.status().is_success() {
-            let registration_response: NodeRegistrationResponse = response
+            let registration_response: EndpointRegistrationResponse = response
                 .json()
                 .map_err(RootRegistrationError::Request)?;
-            debug!("Node registration sent to root");
+            debug!("Endpoint registration sent to root");
             Ok(RegistrationResult {
-                node_id: registration_response.node_id,
+                endpoint_id: registration_response.endpoint_id,
                 token: registration_response.token,
                 gateway_public_key_hex: registration_response.gateway_public_key_hex,
                 assigned_ip: registration_response.assigned_ip,
@@ -265,13 +265,13 @@ mod tests {
             public_key_hex: &str,
             _network_info: Option<&NetworkInfo>,
         ) -> Result<RegistrationResult, RootRegistrationError> {
-            let node_name = "ht-test-node".to_string();
+            let endpoint_name = "ht-test-endpoint".to_string();
             self.records
                 .lock()
                 .expect("lock")
-                .push((node_name.clone(), public_key_hex.to_string()));
+                .push((endpoint_name.clone(), public_key_hex.to_string()));
             Ok(RegistrationResult {
-                node_id: node_name,
+                endpoint_id: endpoint_name,
                 token: "test-token".to_string(),
                 gateway_public_key_hex: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
                 assigned_ip: "100.64.0.1".to_string(),
@@ -304,10 +304,10 @@ mod tests {
             .register(&context, "public-key", None)
             .expect("registration");
 
-        assert_eq!(result.node_id, "ht-test-node");
+        assert_eq!(result.endpoint_id, "ht-test-endpoint");
         let records = registrar.records.lock().expect("lock");
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0, "ht-test-node");
+        assert_eq!(records[0].0, "ht-test-endpoint");
         assert_eq!(records[0].1, "public-key");
     }
 }
