@@ -1,0 +1,27 @@
+# KV store data files
+/data/
+wal.log*
+snapshot.data*
+*.tmp
+
+# Test data (legacy local directories)
+/kv_data/
+/test_data/
+
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Added by cargo
+
+/target
