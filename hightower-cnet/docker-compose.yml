@@ -1,0 +1,18 @@
+services:
+  hightower-cnet:
+    build: .
+    container_name: hightower-cnet
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - HT_AUTH_TOKEN=${HT_AUTH_TOKEN}
+      - HT_GATEWAY_URL=${HT_GATEWAY_URL:-http://127.0.0.1:8008}
+      - HT_HEALTH_CHECK_INTERVAL=30
+    restart: unless-stopped
+
+  app:
+    image: nginx:latest
+    container_name: app
+    network_mode: "service:hightower-cnet"
+    depends_on:
+      - hightower-cnet
