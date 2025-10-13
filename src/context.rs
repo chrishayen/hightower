@@ -300,6 +300,8 @@ pub use token::{TokenError, fetch as fetch_token};
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
 pub const HT_AUTH_KEY: &[u8] = b"secrets/ht_auth_key";
+pub const GATEWAY_URL_KEY: &[u8] = b"gateway/url";
+const GATEWAY_URL_ENV: &str = "HT_GATEWAY_URL";
 const DEFAULT_AUTH_USERNAME_ENV: &str = "HT_DEFAULT_USER";
 const DEFAULT_AUTH_PASSWORD_ENV: &str = "HT_DEFAULT_PASSWORD";
 const DEFAULT_AUTH_USERNAME: &str = "admin";
@@ -469,6 +471,11 @@ pub fn initialize_with_token(
     let kv = kv::initialize(kv_path).map_err(ContextError::Kv)?;
     let context = CommonContext::new(kv);
     context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
+
+    if let Ok(gateway_url) = std::env::var(GATEWAY_URL_ENV) {
+        context.kv.put_secret(GATEWAY_URL_KEY, gateway_url.as_bytes());
+    }
+
     bootstrap_default_user(&context).map_err(ContextError::Auth)?;
     Ok(context)
 }

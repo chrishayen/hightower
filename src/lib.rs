@@ -4,13 +4,11 @@ use context::CommonContext;
 use hightower_client::HightowerConnection;
 use tracing::{debug, error};
 
-const GATEWAY_URL_KEY: &[u8] = b"gateway/url";
-
 pub async fn run(context: &CommonContext) -> Result<HightowerConnection, String> {
     // Get gateway URL from context or use default
     let gateway_url = context
         .kv
-        .get_bytes(GATEWAY_URL_KEY)
+        .get_bytes(context::GATEWAY_URL_KEY)
         .ok()
         .flatten()
         .and_then(|bytes| String::from_utf8(bytes).ok())
