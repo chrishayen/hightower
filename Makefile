@@ -40,7 +40,7 @@ build-arm64: ## Build for ARM64 (aarch64) Linux using cross
 build-all: build-x86_64 build-arm64 ## Build for both x86_64 and ARM64
 
 install: ## Install hightower CLI to ~/.local
-	$(CARGO_BIN) install --path hightower --root ~/.local
+	$(CARGO_BIN) install --path cli --root ~/.local
 
 test: ## Run all tests in workspace
 	$(CARGO_BIN) test
@@ -59,27 +59,27 @@ gateway-dev: ## Run gateway in dev mode with debug logging
 	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
 	DISABLE_HTTPS=true \
 	HTTP_PORT=8008 \
-	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p hightower-gateway
+	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p gateway
 
 gateway-test: ## Run gateway tests
-	$(CARGO_BIN) test -p hightower-gateway
+	$(CARGO_BIN) test -p gateway
 
 gateway-check: ## Run cargo check on gateway
-	$(CARGO_BIN) check -p hightower-gateway
+	$(CARGO_BIN) check -p gateway
 
 ## Node targets
 
 node-build: ## Build the node binary
-	$(CARGO_BIN) build -p hightower-node
+	$(CARGO_BIN) build -p node
 
 node-build-release: ## Build the node binary in release mode
-	$(CARGO_BIN) build --release -p hightower-node
+	$(CARGO_BIN) build --release -p node
 
 node-run: ## Run the node with debug logging and test auth key
 	HT_AUTH_KEY=$(HT_AUTH_KEY) \
 	HT_DEFAULT_USER=$(HT_DEFAULT_USER) \
 	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
-	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p hightower-node
+	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p node
 
 node-dev: ## Run node in dev mode (clean data directory, connect to local gateway)
 	rm -rf ~/.hightower
@@ -87,7 +87,7 @@ node-dev: ## Run node in dev mode (clean data directory, connect to local gatewa
 	HT_DEFAULT_USER=$(HT_DEFAULT_USER) \
 	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
 	HT_GATEWAY_URL=http://127.0.0.1:8008 \
-	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p hightower-node
+	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p node
 
 node-prod: ## Run node in prod mode (clean data directory, connect to gateway.shotgun.dev)
 	rm -rf ~/.hightower
@@ -95,15 +95,15 @@ node-prod: ## Run node in prod mode (clean data directory, connect to gateway.sh
 	HT_DEFAULT_USER=$(HT_DEFAULT_USER) \
 	HT_DEFAULT_PASSWORD=$(HT_DEFAULT_PASSWORD) \
 	HT_GATEWAY_URL=https://gateway.shotgun.dev \
-	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p hightower-node
+	RUST_LOG=$(RUST_LOG) $(CARGO_BIN) run -p node
 
 node-test: ## Run node tests
-	$(CARGO_BIN) test -p hightower-node
+	$(CARGO_BIN) test -p node
 
 ## STUN targets
 
 stun-run: ## Run STUN server via hightower CLI
-	$(CARGO_BIN) run -p hightower --bin ht -- stun
+	$(CARGO_BIN) run -p cli --bin ht -- stun
 
 stun-build: ## Build STUN server binary for deployment
 	$(CARGO_BIN) build --release --target $(STUN_TARGET) --bin $(STUN_BINARY_NAME)
@@ -115,21 +115,21 @@ stun-deploy: stun-build ## Deploy STUN server to remote host
 	@echo "Deployed $(STUN_BINARY_NAME) to $(STUN_REMOTE_HOST)"
 
 stun-test: ## Run STUN tests
-	$(CARGO_BIN) test -p hightower-stun
+	$(CARGO_BIN) test -p stun
 
 ## Packaging targets
 
 deb: build ## Build Debian package
-	$(CARGO_BIN) deb -p hightower
+	$(CARGO_BIN) deb -p cli
 
 deb-arm64: ## Build Debian package for ARM64
-	$(CARGO_BIN) deb -p hightower --target aarch64-unknown-linux-gnu
+	$(CARGO_BIN) deb -p cli --target aarch64-unknown-linux-gnu
 
 rpm: build ## Build RPM package
-	$(CARGO_BIN) generate-rpm -p hightower
+	$(CARGO_BIN) generate-rpm -p cli
 
 aur: ## Generate AUR package files
-	$(CARGO_BIN) aur -p hightower
+	$(CARGO_BIN) aur -p cli
 	@echo "AUR package files generated in target/cargo-aur/"
 	@ls -la target/cargo-aur/
 

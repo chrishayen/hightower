@@ -1,0 +1,18 @@
+[package]
+name = "naming"
+version = "0.1.4"
+edition = "2021"
+authors = ["Chris Hayen"]
+license = "MIT OR Apache-2.0"
+description = "Generate random names with epic adjectives and nouns"
+repository = "https://github.com/chrishayen/hightower-naming"
+keywords = ["random", "names", "generator"]
+categories = ["development-tools"]
+exclude = [
+    ".gitignore",
+    ".git/",
+    "target/",
+]
+
+[dependencies]
+rand = "0.8"

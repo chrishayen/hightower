@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "hightower",
-    "hightower-client",
-    "hightower-cnet",
-    "hightower-gateway",
-    "hightower-kv",
-    "hightower-mdns",
-    "hightower-naming",
-    "hightower-node",
-    "hightower-stun",
-    "hightower-wireguard",
+    "cli",
+    "client",
+    "cnet",
+    "gateway",
+    "kv",
+    "mdns",
+    "naming",
+    "node",
+    "stun",
+    "wireguard",
 ]
 
 [workspace.package]
