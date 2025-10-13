@@ -15,7 +15,7 @@ name = "ht"
 path = "src/main.rs"
 
 [dependencies]
-hightower-client = "0.1.4"
+hightower-client = "0.1"
 hightower-gateway = "0.1.7"
 hightower-stun = "0.1"
 clap = { version = "4.4", features = ["derive", "env"] }
