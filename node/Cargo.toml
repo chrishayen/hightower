@@ -1,0 +1,29 @@
+[package]
+name = "node"
+version = "0.1.2"
+edition = "2021"
+authors = ["Chris Hayen <chris@shotgun.dev>"]
+description = "Hightower node service"
+repository = "https://github.com/chrishayen/hightower-node"
+license = "MIT"
+
+[lib]
+name = "node"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ht-node"
+path = "src/main.rs"
+
+[dependencies]
+client = { path = "../client" }
+kv = { path = "../kv" }
+rand = "0.8"
+tempfile = "3"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5.13", features = ["derive"] }
+ctrlc = "3"
+
+[dev-dependencies]

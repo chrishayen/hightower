@@ -1,58 +1,27 @@
-[package]
-name = "hightower"
+[workspace]
+resolver = "2"
+members = [
+    "cli",
+    "client",
+    "cnet",
+    "gateway",
+    "kv",
+    "mdns",
+    "naming",
+    "node",
+    "stun",
+    "wireguard",
+]
+
+[workspace.package]
 version = "0.1.3"
 edition = "2021"
 authors = ["Chris Hayen <chris@shotgun.dev>"]
-description = "Hightower CLI"
 license = "MIT"
 repository = "https://github.com/chrishayen/hightower"
-readme = "README.md"
-keywords = ["wireguard", "networking", "stun", "gateway", "peer"]
-categories = ["network-programming", "command-line-utilities"]
 
-[[bin]]
-name = "ht"
-path = "src/main.rs"
-
-[dependencies]
-hightower-client = "0.1"
-hightower-gateway = "0.1.7"
-hightower-stun = "0.1"
-clap = { version = "4.4", features = ["derive", "env"] }
-anyhow = "1.0"
-ctrlc = "3.5"
-tokio = { version = "1", features = ["full"] }
-url = "2.5"
-
-[package.metadata.deb]
-maintainer = "Chris Hayen <chris@shotgun.dev>"
-copyright = "2025, Chris Hayen <chris@shotgun.dev>"
-license-file = ["LICENSE", "4"]
-section = "net"
-priority = "optional"
-depends = "libgcc-s1"
-maintainer-scripts = "debian/"
-extended-description = """\
-Hightower is a WireGuard networking toolkit that provides utilities for \
-STUN server functionality, gateway management, and peer connections. \
-The ht CLI tool provides commands for server management and fetching \
-content from WireGuard peer endpoints."""
-assets = [
-    ["target/release/ht", "usr/bin/", "755"],
-    ["README.md", "usr/share/doc/hightower/", "644"],
-    ["hightower-stun.service", "lib/systemd/system/", "644"],
-    ["hightower-gateway.service", "lib/systemd/system/", "644"],
-    ["hightower-node.service", "lib/systemd/system/", "644"],
-]
-
-[package.metadata.generate-rpm]
-assets = [
-    { source = "target/release/ht", dest = "/usr/bin/ht", mode = "755" },
-    { source = "README.md", dest = "/usr/share/doc/hightower/README.md", mode = "644" },
-    { source = "hightower-stun.service", dest = "/lib/systemd/system/hightower-stun.service", mode = "644" },
-    { source = "hightower-gateway.service", dest = "/lib/systemd/system/hightower-gateway.service", mode = "644" },
-    { source = "hightower-node.service", dest = "/lib/systemd/system/hightower-node.service", mode = "644" },
-]
-
-[package.metadata.aur]
-depends = ["gcc-libs"]
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,35 @@
+{% if keys.len() == 0 %}
+<p class="dashboard-empty">No auth keys generated yet.</p>
+{% else %}
+<table class="dashboard-table">
+  <thead>
+    <tr>
+      <th>Key ID</th>
+      <th>Last 8 Characters</th>
+      <th>Created</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for key in keys %}
+    <tr>
+      <td><code>{{ key.key_id }}</code></td>
+      <td><code>...{{ key.last_chars }}</code></td>
+      <td>{{ key.created_at }}</td>
+      <td>
+        <button
+          type="button"
+          class="revoke-btn"
+          hx-delete="/api/auth/keys/{{ key.key_id }}"
+          hx-confirm="Are you sure you want to revoke this key?"
+          hx-target="#keys-list"
+          hx-trigger="click"
+        >
+          Revoke
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

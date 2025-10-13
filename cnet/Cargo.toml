@@ -1,0 +1,11 @@
+[package]
+name = "cnet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+client = { path = "../client" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
