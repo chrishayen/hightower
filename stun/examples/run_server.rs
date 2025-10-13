@@ -1,4 +1,4 @@
-use stun::server::StunServer;
+use hightower_stun::server::StunServer;
 
 fn main() {
     let addr = "0.0.0.0:3478";

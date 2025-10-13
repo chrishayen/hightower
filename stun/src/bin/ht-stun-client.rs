@@ -1,4 +1,4 @@
-use stun::client::StunClient;
+use hightower_stun::client::StunClient;
 use std::env;
 
 const DEFAULT_STUN_PORT: u16 = 3478;

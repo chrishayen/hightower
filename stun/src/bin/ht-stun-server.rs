@@ -1,4 +1,4 @@
-use stun::server::StunServer;
+use hightower_stun::server::StunServer;
 use std::env;
 
 fn main() {

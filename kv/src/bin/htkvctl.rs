@@ -2,9 +2,9 @@ use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 
-use kv::auth_types::UserRecord;
-use kv::storage::Storage;
-use kv::{SingleNodeEngine, StoreConfig};
+use hightower_kv::auth_types::UserRecord;
+use hightower_kv::storage::Storage;
+use hightower_kv::{SingleNodeEngine, StoreConfig};
 
 fn main() {
     if let Err(err) = run() {
@@ -107,10 +107,10 @@ mod tests {
         let mut cfg = StoreConfig::default();
         cfg.data_dir = temp.path().join("users").to_string_lossy().into_owned();
         let engine = SingleNodeEngine::with_config(cfg.clone()).unwrap();
-        let service = kv::AuthService::new(
+        let service = hightower_kv::AuthService::new(
             engine,
-            kv::crypto::Argon2SecretHasher::default(),
-            kv::crypto::AesGcmEncryptor::new([0u8; 32]),
+            hightower_kv::crypto::Argon2SecretHasher::default(),
+            hightower_kv::crypto::AesGcmEncryptor::new([0u8; 32]),
         );
         service.create_user("alice", "password").unwrap();
         let users = collect_users(&cfg).unwrap();

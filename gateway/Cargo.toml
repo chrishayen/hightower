@@ -11,6 +11,7 @@ keywords = ["gateway", "wireguard", "hightower"]
 categories = ["network-programming"]
 
 [lib]
+name = "gateway"
 path = "src/lib.rs"
 
 [[bin]]
