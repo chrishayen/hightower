@@ -1,0 +1,30 @@
+[Unit]
+Description=Hightower Gateway Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ht run gateway
+Restart=on-failure
+RestartSec=5
+User=hightower
+Group=hightower
+
+# Security hardening
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/hightower /var/lib/hightower
+
+# Allow binding to privileged ports (80, 443)
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hightower-gateway
+
+[Install]
+WantedBy=multi-user.target
