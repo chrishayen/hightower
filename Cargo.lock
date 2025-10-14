@@ -1145,7 +1145,9 @@ name = "hightower-cnet"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "hightower-client",
+ "hightower-wireguard",
  "tokio",
  "tracing",
  "tracing-subscriber",

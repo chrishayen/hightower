@@ -13,16 +13,61 @@ const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8008";
 const API_PATH: &str = "/api/endpoints";
 
 /// Main connection to Hightower gateway with integrated WireGuard transport
+///
+/// This is the primary API for connecting to a Hightower network. It encapsulates
+/// all the complexity of WireGuard transport management, gateway registration,
+/// and peer-to-peer connectivity.
+///
+/// # Lifecycle
+/// 1. Create via [`connect()`](Self::connect) or variants
+/// 2. Use [`dial()`](Self::dial) to connect to peers
+/// 3. Clean up via [`disconnect()`](Self::disconnect) to deregister
+///
+/// # Examples
+/// ```no_run
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use hightower_client::HightowerConnection;
+///
+/// let conn = HightowerConnection::connect(
+///     "http://gateway.example.com:8008",
+///     "your-auth-token"
+/// ).await?;
+///
+/// println!("Connected as {}", conn.endpoint_id());
+///
+/// conn.disconnect().await?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct HightowerConnection {
+    /// Wrapper around the WireGuard UDP connection (provides send/recv API)
     transport: TransportServer,
+
+    /// Human-readable endpoint identifier assigned by gateway (e.g., "ht-festive-penguin-abc123")
     endpoint_id: String,
+
+    /// Virtual IP address assigned by gateway on the WireGuard network (e.g., "100.64.0.5")
     assigned_ip: String,
+
+    /// Registration token used for deregistration (gateway-issued, one-time use)
     token: String,
+
+    /// User's authentication token for API calls to gateway (persistent across sessions)
     auth_token: String,
+
+    /// Full HTTP endpoint URL for gateway API (e.g., "http://gateway.example.com:8008/api/endpoints")
     endpoint: String,
+
+    /// Base gateway URL without path (e.g., "http://gateway.example.com:8008")
     gateway_url: String,
+
+    /// Gateway's WireGuard UDP endpoint (host:51820, resolved from gateway_url)
     gateway_endpoint: SocketAddr,
+
+    /// Gateway's WireGuard public key (for establishing encrypted tunnel)
     gateway_public_key: PublicKey25519,
+
+    /// Storage manager for persisting connection state (None if ephemeral mode)
     storage: Option<ConnectionStorage>,
 }
 
@@ -101,7 +146,10 @@ impl HightowerConnection {
 
         let endpoint = build_endpoint(&gateway_url)?;
 
-        // Initialize storage if not ephemeral
+        // ===== STEP 1: Initialize Storage (if not ephemeral) =====
+        // Storage provides identity persistence - same keys across restarts means
+        // stable endpoint IDs and IPs. Without storage, each connection gets a fresh
+        // identity and new endpoint ID from the gateway.
         let storage = if ephemeral {
             None
         } else if let Some(dir) = storage_dir {
@@ -124,7 +172,10 @@ impl HightowerConnection {
             }
         };
 
-        // Check for existing stored connection
+        // ===== STEP 2: Attempt to Restore Existing Connection =====
+        // If we have storage enabled, check if we previously connected to this gateway.
+        // Restoration reuses the same WireGuard private key (same identity), avoiding
+        // re-registration and maintaining the same endpoint ID and assigned IP.
         if let Some(ref storage) = storage {
             if let Ok(Some(stored)) = storage.get_connection() {
                 info!(endpoint_id = %stored.endpoint_id, "Found stored connection, attempting to restore");
@@ -142,17 +193,22 @@ impl HightowerConnection {
             }
         }
 
-        // No stored connection or restore failed - create fresh connection
+        // ===== STEP 3: Create Fresh Connection =====
+        // No stored connection exists, or restoration failed. Generate new keys,
+        // discover our network location, and register with the gateway.
         info!("Creating fresh connection to gateway");
 
-        // 1. Generate WireGuard keypair
+        // 3.1. Generate WireGuard keypair (X25519)
+        // This becomes our cryptographic identity for the session
         let (private_key, public_key) = dh_generate();
         let public_key_hex = hex::encode(public_key);
         let private_key_hex = hex::encode(private_key);
 
         debug!("Generated WireGuard keypair");
 
-        // 2. Create WireGuard transport server on 0.0.0.0:0
+        // 3.2. Create WireGuard transport server on 0.0.0.0:0
+        // Binding to 0.0.0.0:0 lets the OS choose an available ephemeral port.
+        // This port is then used for STUN discovery to get accurate NAT mapping.
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().map_err(|e| {
             ClientError::Configuration(format!("invalid bind address: {}", e))
         })?;
@@ -163,7 +219,10 @@ impl HightowerConnection {
 
         debug!("Created transport connection");
 
-        // 3. Discover network info using actual bound port
+        // 3.3. Discover network info using actual bound port
+        // STUN discovery reveals our public IP:port as seen by the internet.
+        // Using the actual bound port ensures NAT mapping is accurate.
+        // This information is sent to the gateway so peers can reach us directly.
         let local_addr = connection.local_addr();
 
         let network_info = crate::ip_discovery::discover_with_bound_address(local_addr, None)
@@ -177,7 +236,9 @@ impl HightowerConnection {
             "Discovered network information"
         );
 
-        // 4. Register with gateway
+        // 3.4. Register with gateway
+        // Send our public key and network info to the gateway.
+        // Gateway responds with: endpoint ID, assigned IP, registration token, and gateway public key.
         let registration = register_with_gateway(
             &endpoint,
             &auth_token,
@@ -192,7 +253,9 @@ impl HightowerConnection {
             "Registered with gateway"
         );
 
-        // 5. Add gateway as peer
+        // 3.5. Add gateway as WireGuard peer
+        // Configure our WireGuard transport to recognize the gateway's public key.
+        // This enables the encrypted tunnel for control plane communication.
         let gateway_public_key_bytes = hex::decode(&registration.gateway_public_key_hex)
             .map_err(|e| {
                 ClientError::InvalidResponse(format!("invalid gateway public key hex: {}", e))
@@ -212,7 +275,10 @@ impl HightowerConnection {
 
         debug!("Added gateway as peer");
 
-        // 6. Store connection info
+        // 3.6. Store connection info for future restoration
+        // Persist our private key, endpoint ID, token, and gateway info.
+        // Next time we connect to this gateway, we'll restore this identity
+        // instead of registering as a new endpoint.
         if let Some(ref storage) = storage {
             let now = current_timestamp();
             let stored = StoredConnection {
