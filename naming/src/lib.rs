@@ -9,15 +9,15 @@ use rand::Rng;
 ///
 /// ```
 /// // No random suffix - just adjective-noun
-/// let name = naming::generate_random_name(None);
+/// let name = hightower_naming::generate_random_name(None);
 /// // Example: "brave-tiger"
 ///
 /// // With random suffix of default length (5 characters)
-/// let name = naming::generate_random_name(Some(5));
+/// let name = hightower_naming::generate_random_name(Some(5));
 /// // Example: "brave-tiger-a1b2c"
 ///
 /// // With custom random suffix length (10 characters)
-/// let name = naming::generate_random_name(Some(10));
+/// let name = hightower_naming::generate_random_name(Some(10));
 /// // Example: "brave-tiger-x9y8z7w6v5"
 /// ```
 pub fn generate_random_name(random_suffix_length: Option<usize>) -> String {
@@ -30,15 +30,15 @@ pub fn generate_random_name(random_suffix_length: Option<usize>) -> String {
 ///
 /// ```
 /// // With custom prefix
-/// let name = naming::generate_random_name_with_prefix(Some("app"), None);
+/// let name = hightower_naming::generate_random_name_with_prefix(Some("app"), None);
 /// // Example: "app-brave-tiger"
 ///
 /// // With custom prefix and random suffix
-/// let name = naming::generate_random_name_with_prefix(Some("app"), Some(5));
+/// let name = hightower_naming::generate_random_name_with_prefix(Some("app"), Some(5));
 /// // Example: "app-brave-tiger-a1b2c"
 ///
 /// // No prefix (same as generate_random_name)
-/// let name = naming::generate_random_name_with_prefix(None, Some(5));
+/// let name = hightower_naming::generate_random_name_with_prefix(None, Some(5));
 /// // Example: "brave-tiger-a1b2c"
 /// ```
 pub fn generate_random_name_with_prefix(prefix: Option<&str>, random_suffix_length: Option<usize>) -> String {

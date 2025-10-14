@@ -1,5 +1,5 @@
-use kv::crypto::{AesGcmEncryptor, Argon2SecretHasher};
-use kv::{AuthService, SingleNodeEngine, StoreConfig};
+use hightower_kv::crypto::{AesGcmEncryptor, Argon2SecretHasher};
+use hightower_kv::{AuthService, SingleNodeEngine, StoreConfig};
 use std::error::Error;
 use std::path::PathBuf;
 use tempfile::TempDir;

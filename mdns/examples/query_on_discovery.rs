@@ -1,4 +1,4 @@
-use mdns::Mdns;
+use hightower_mdns::Mdns;
 use std::net::Ipv4Addr;
 
 #[tokio::main]

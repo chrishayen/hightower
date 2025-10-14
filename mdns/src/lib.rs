@@ -64,7 +64,7 @@ impl Mdns {
     /// # Example
     ///
     /// ```no_run
-    /// use mdns::Mdns;
+    /// use hightower_mdns::Mdns;
     /// use std::net::Ipv4Addr;
     ///
     /// let mdns = Mdns::new("myhost", Ipv4Addr::new(192, 168, 1, 100)).unwrap();

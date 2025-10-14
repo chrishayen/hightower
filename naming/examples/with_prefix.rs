@@ -1,4 +1,4 @@
-use naming::generate_random_name_with_prefix;
+use hightower_naming::generate_random_name_with_prefix;
 
 fn main() {
     // With custom prefix

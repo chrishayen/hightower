@@ -1,4 +1,4 @@
-use kv::{KvEngine, SingleNodeEngine, StoreConfig};
+use hightower_kv::{KvEngine, SingleNodeEngine, StoreConfig};
 use std::error::Error;
 use std::path::PathBuf;
 use tempfile::TempDir;

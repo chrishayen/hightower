@@ -1,5 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use kv::{KvEngine, SingleNodeEngine, StoreConfig};
+use hightower_kv::{KvEngine, SingleNodeEngine, StoreConfig};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use std::sync::Arc;
 use std::thread;

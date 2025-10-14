@@ -1,4 +1,4 @@
-use naming::generate_random_name;
+use hightower_naming::generate_random_name;
 
 fn main() {
     // With custom random suffix length (10 characters)

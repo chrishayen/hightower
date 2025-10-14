@@ -1,7 +1,7 @@
-use kv::{SingleNodeEngine, StoreConfig};
+use hightower_kv::{SingleNodeEngine, StoreConfig};
 use tempfile::TempDir;
 
-fn main() -> kv::Result<()> {
+fn main() -> hightower_kv::Result<()> {
     let temp_dir = TempDir::new()?;
     let mut config = StoreConfig::default();
     config.data_dir = temp_dir.path().join("prefix-demo").to_string_lossy().into_owned();
