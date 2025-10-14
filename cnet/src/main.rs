@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use client::HightowerConnection;
 use std::time::Duration;
-use tracing::{error, info};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tracing::{error, info, warn};
 
 #[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
@@ -18,6 +20,9 @@ async fn main() -> Result<()> {
     let gateway_url = std::env::var("HT_GATEWAY_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
 
+    let target_addr = std::env::var("HT_TARGET_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:80".to_string());
+
     info!("Connecting to gateway: {}", gateway_url);
 
     let connection = HightowerConnection::connect(&gateway_url, &auth_token)
@@ -27,7 +32,29 @@ async fn main() -> Result<()> {
     info!("Connected successfully");
     info!("  Node ID: {}", connection.endpoint_id());
     info!("  Assigned IP: {}", connection.assigned_ip());
+    info!("  Forwarding to: {}", target_addr);
     info!("WireGuard tunnel established - routing ready");
+
+    // Start listening for incoming connections
+    let mut incoming = connection
+        .transport()
+        .connection()
+        .listen()
+        .await
+        .context("Failed to start listening for connections")?;
+
+    info!("Listening for incoming connections");
+
+    tokio::spawn(async move {
+        while let Some(stream) = incoming.recv().await {
+            let target_addr = target_addr.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle_connection(stream, &target_addr).await {
+                    error!("Connection handler error: {}", e);
+                }
+            });
+        }
+    });
 
     wait_for_shutdown(&connection).await;
 
@@ -39,6 +66,64 @@ async fn main() -> Result<()> {
 
     info!("Disconnected successfully");
 
+    Ok(())
+}
+
+async fn handle_connection(
+    mut wg_stream: wireguard::connection::Stream,
+    target_addr: &str,
+) -> Result<()> {
+    info!(
+        "Incoming connection from peer {}, forwarding to {}",
+        hex::encode(&wg_stream.peer_public_key()[..8]),
+        target_addr
+    );
+
+    let mut tcp_stream = TcpStream::connect(target_addr)
+        .await
+        .context(format!("Failed to connect to target {}", target_addr))?;
+
+    let (mut tcp_read, mut tcp_write) = tcp_stream.split();
+    let mut buf = vec![0u8; 8192];
+
+    loop {
+        tokio::select! {
+            result = wg_stream.recv() => {
+                match result {
+                    Ok(data) => {
+                        if data.is_empty() {
+                            break;
+                        }
+                        if let Err(e) = tcp_write.write_all(&data).await {
+                            warn!("Failed to write to TCP: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("WireGuard recv error: {}", e);
+                        break;
+                    }
+                }
+            }
+            result = tcp_read.read(&mut buf) => {
+                match result {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Err(e) = wg_stream.send(&buf[..n]).await {
+                            warn!("Failed to send to WireGuard: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("TCP read error: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Connection closed");
     Ok(())
 }
 

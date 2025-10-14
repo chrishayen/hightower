@@ -10,6 +10,7 @@ services:
       - HT_AUTH_TOKEN=${HT_AUTH_TOKEN}
       - HT_GATEWAY_URL=${HT_GATEWAY_URL:-http://127.0.0.1:8008}
       - HT_HEALTH_CHECK_INTERVAL=30
+      - HT_TARGET_ADDR=127.0.0.1:80
     restart: unless-stopped
 
   app:
