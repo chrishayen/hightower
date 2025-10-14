@@ -20,7 +20,7 @@ enum Commands {
     },
     /// Fetch content from WireGuard peer endpoints via hightower
     Curl {
-        /// The URL to fetch (e.g., http://<peer-ip>/endpoint)
+        /// The URL to fetch (e.g., http://<endpoint-id>/path or http://<assigned-ip>/path)
         url: String,
 
         /// Gateway URL (defaults to http://127.0.0.1:8008)

@@ -9,9 +9,9 @@ pub async fn run(
 ) -> Result<()> {
     let url = url::Url::parse(url).context("Invalid URL")?;
 
-    let peer_ip = url
+    let peer = url
         .host_str()
-        .context("URL must contain a host (peer IP)")?;
+        .context("URL must contain a host (endpoint ID or assigned IP)")?;
     let port = url.port().unwrap_or(80);
     let path = if url.path().is_empty() {
         "/"
@@ -36,13 +36,30 @@ pub async fn run(
     if verbose {
         eprintln!("Connected to gateway as {}", connection.endpoint_id());
         eprintln!("Assigned IP: {}", connection.assigned_ip());
-        eprintln!("Fetching from peer {} on port {}...", peer_ip, port);
+        eprintln!("\nLooking up peer info for '{}'...", peer);
+    }
+
+    // Get peer info to show details
+    let peer_info = connection
+        .get_peer_info(peer)
+        .await
+        .context(format!("Failed to lookup peer '{}'", peer))?;
+
+    if verbose {
+        eprintln!("Found peer:");
+        eprintln!("  Endpoint ID: {}", peer_info.endpoint_id.as_deref().unwrap_or("unknown"));
+        eprintln!("  Assigned IP: {}", peer_info.assigned_ip.as_deref().unwrap_or("unknown"));
+        eprintln!("  Public Key: {}...", &peer_info.public_key_hex[..16]);
+        if let Some(endpoint) = peer_info.endpoint() {
+            eprintln!("  Public Endpoint: {}", endpoint);
+        }
+        eprintln!("\nEstablishing WireGuard connection...");
     }
 
     let mut conn = connection
-        .dial(peer_ip, port)
+        .dial(peer, port)
         .await
-        .context(format!("Failed to dial peer {}", peer_ip))?;
+        .context(format!("Failed to dial peer '{}'", peer))?;
 
     if verbose {
         eprintln!("Connected to peer, sending HTTP request...");
@@ -50,7 +67,7 @@ pub async fn run(
 
     let request = format!(
         "GET {}{} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        path, query, peer_ip
+        path, query, peer
     );
 
     conn.send(request.as_bytes())

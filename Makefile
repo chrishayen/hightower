@@ -119,7 +119,7 @@ stun-test: ## Run STUN tests
 
 ## Packaging targets
 
-deb: build ## Build Debian package
+deb: ## Build Debian package
 	$(CARGO_BIN) deb -p hightower-cli
 
 deb-arm64: ## Build Debian package for ARM64
@@ -137,12 +137,12 @@ aur: ## Generate AUR package files
 
 deploy-test: deb-arm64 ## Deploy deb package to test server
 	@echo "Deploying to $(DEPLOY_HOST)..."
-	scp target/aarch64-unknown-linux-gnu/debian/hightower_*.deb $(DEPLOY_USER)@$(DEPLOY_HOST):/tmp/
-	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) 'dpkg -i /tmp/hightower_*.deb && \
+	scp target/aarch64-unknown-linux-gnu/debian/hightower-cli_*.deb $(DEPLOY_USER)@$(DEPLOY_HOST):/tmp/
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) 'dpkg -i /tmp/hightower-cli_*.deb && \
 		systemctl restart hightower-stun.service && \
 		systemctl restart hightower-gateway.service && \
 		systemctl restart hightower-node.service && \
-		rm /tmp/hightower_*.deb'
+		rm /tmp/hightower-cli_*.deb'
 	@echo "Deployment complete!"
 
 ## Development workflow targets
