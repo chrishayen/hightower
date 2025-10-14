@@ -77,7 +77,7 @@ pub fn aead_encrypt(
     (&mut nonce_bytes[4..])
         .write_u64::<LittleEndian>(counter)
         .unwrap();
-    let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+    let nonce = &nonce_bytes.into();
 
     cipher
         .encrypt(
@@ -104,7 +104,7 @@ pub fn aead_decrypt(
     (&mut nonce_bytes[4..])
         .write_u64::<LittleEndian>(counter)
         .unwrap();
-    let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+    let nonce = &nonce_bytes.into();
 
     cipher
         .decrypt(

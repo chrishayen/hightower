@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod keepalive_test {
-    use wireguard::crypto::dh_generate;
-    use wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
+    use hightower_wireguard::connection::Connection;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 

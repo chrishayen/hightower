@@ -1,5 +1,5 @@
-use wireguard::crypto::dh_generate;
-use wireguard::protocol::{PeerInfo, WireGuardProtocol};
+use hightower_wireguard::crypto::dh_generate;
+use hightower_wireguard::protocol::{PeerInfo, WireGuardProtocol};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("WireGuard Message Serialization Example\n");
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Simulate network transmission by deserializing
     println!("\n2. Transmitting over network...");
-    let received_initiation = wireguard::messages::HandshakeInitiation::from_bytes(
+    let received_initiation = hightower_wireguard::messages::HandshakeInitiation::from_bytes(
         &initiation_bytes,
     )?;
     println!("   Bob received and deserialized initiation");
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Simulate network transmission by deserializing
     println!("\n4. Transmitting response over network...");
     let received_response =
-        wireguard::messages::HandshakeResponse::from_bytes(&response_bytes)?;
+        hightower_wireguard::messages::HandshakeResponse::from_bytes(&response_bytes)?;
     println!("   Alice received and deserialized response");
     println!("   Sender ID: {}", received_response.sender);
     println!("   Receiver ID: {}", received_response.receiver);

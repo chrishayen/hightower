@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod transport_security_tests {
-    use wireguard::crypto::dh_generate;
-    use wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
+    use hightower_wireguard::connection::Connection;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 
@@ -82,7 +82,7 @@ mod transport_security_tests {
 
     #[tokio::test]
     async fn test_automatic_rekey() {
-        use wireguard::connection::TimeoutConfig;
+        use hightower_wireguard::connection::TimeoutConfig;
         use std::time::Duration;
 
         // Test that sessions rekey automatically after REKEY_AFTER_TIME
@@ -96,14 +96,14 @@ mod transport_security_tests {
         let (alice_private, alice_public) = dh_generate();
         let (bob_private, bob_public) = dh_generate();
 
-        let alice = wireguard::connection::Connection::with_timeouts(
+        let alice = hightower_wireguard::connection::Connection::with_timeouts(
             "127.0.0.1:0".parse().unwrap(),
             alice_private,
             timeouts,
         )
         .await
         .unwrap();
-        let bob = wireguard::connection::Connection::with_timeouts(
+        let bob = hightower_wireguard::connection::Connection::with_timeouts(
             "127.0.0.1:0".parse().unwrap(),
             bob_private,
             timeouts,
@@ -137,7 +137,7 @@ mod transport_security_tests {
 
     #[tokio::test]
     async fn test_session_timeout() {
-        use wireguard::connection::TimeoutConfig;
+        use hightower_wireguard::connection::TimeoutConfig;
         use std::time::Duration;
 
         // Test that idle sessions are cleaned up after session_timeout
@@ -151,14 +151,14 @@ mod transport_security_tests {
         let (alice_private, alice_public) = dh_generate();
         let (bob_private, bob_public) = dh_generate();
 
-        let alice = wireguard::connection::Connection::with_timeouts(
+        let alice = hightower_wireguard::connection::Connection::with_timeouts(
             "127.0.0.1:0".parse().unwrap(),
             alice_private,
             timeouts,
         )
         .await
         .unwrap();
-        let bob = wireguard::connection::Connection::with_timeouts(
+        let bob = hightower_wireguard::connection::Connection::with_timeouts(
             "127.0.0.1:0".parse().unwrap(),
             bob_private,
             timeouts,
