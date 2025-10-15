@@ -17,3 +17,4 @@ keys and connection details between peers.
 - If a file handles more than one major responsibility, split it
 - Create subdirectories to group related files. For example, if you have multiple files for one feature (noise_ik), put them in their own folder (src/core/noise_ik/)
 - Use standard zig testing practices of a seperate test file per module
+- always run zig built test after a change
