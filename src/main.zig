@@ -149,7 +149,7 @@ fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
     const state_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "state.dat" });
     defer allocator.free(state_path);
 
-    const file = std.fs.cwd().openFile(state_path, .{}) catch |err| {
+    const file = openStateFile(state_path) catch |err| {
         if (err == error.FileNotFound) {
             return store;
         }
@@ -165,14 +165,12 @@ fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
     return store;
 }
 
+fn openStateFile(path: []const u8) !std.fs.File {
+    return try std.fs.cwd().openFile(path, .{});
+}
+
 fn kvInit(allocator: std.mem.Allocator, path: []const u8) !void {
-    std.fs.cwd().makeDir(path) catch |err| {
-        if (err == error.PathAlreadyExists) {
-            std.debug.print("Error: Directory '{s}' already exists\n", .{path});
-            return error.PathAlreadyExists;
-        }
-        return err;
-    };
+    try createDirectory(path);
 
     var store = try kv.KVStore.init(allocator, 1);
     defer store.deinit(allocator);
@@ -182,6 +180,16 @@ fn kvInit(allocator: std.mem.Allocator, path: []const u8) !void {
     try saveKVStore(allocator, &store, path);
 
     std.debug.print("KV store initialized at '{s}'\n", .{path});
+}
+
+fn createDirectory(path: []const u8) !void {
+    std.fs.cwd().makeDir(path) catch |err| {
+        if (err == error.PathAlreadyExists) {
+            std.debug.print("Error: Directory '{s}' already exists\n", .{path});
+            return error.PathAlreadyExists;
+        }
+        return err;
+    };
 }
 
 fn kvConnect(allocator: std.mem.Allocator, path: []const u8) !void {

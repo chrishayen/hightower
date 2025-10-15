@@ -253,16 +253,28 @@ pub fn parseXorMappedAddress(data: []const u8, transaction_id: [12]u8) !?types.I
         return types.StunError.InvalidMessageType;
     }
 
-    if (header.message_length > types.MAX_MESSAGE_LENGTH) {
+    if (!try validateMessageLength(header, data)) {
         return types.StunError.InvalidMessageLength;
+    }
+
+    return try findXorMappedAddressAttribute(data, header.message_length, transaction_id);
+}
+
+fn validateMessageLength(header: types.MessageHeader, data: []const u8) !bool {
+    if (header.message_length > types.MAX_MESSAGE_LENGTH) {
+        return false;
     }
 
     if (header.message_length > data.len - types.MessageHeader.SIZE) {
-        return types.StunError.InvalidMessageLength;
+        return false;
     }
 
+    return true;
+}
+
+fn findXorMappedAddressAttribute(data: []const u8, message_length: u16, transaction_id: [12]u8) !?types.IpAddress {
     var offset: usize = types.MessageHeader.SIZE;
-    const body_end = types.MessageHeader.SIZE + header.message_length;
+    const body_end = types.MessageHeader.SIZE + message_length;
 
     while (offset + types.AttributeHeader.SIZE <= body_end) {
         const attr_type_raw = std.mem.readInt(u16, data[offset..][0..2], .big);
@@ -277,10 +289,9 @@ pub fn parseXorMappedAddress(data: []const u8, transaction_id: [12]u8) !?types.I
 
         if (attr_type == .xor_mapped_address) {
             const xor_addr = try parseAddress(data[offset .. offset + attr_length]);
-            return xorAddress(xor_addr, transaction_id); // XOR again to decode
+            return xorAddress(xor_addr, transaction_id);
         }
 
-        // Move to next attribute (attributes are padded to 4-byte boundary)
         const padding = (4 - (attr_length % 4)) % 4;
         offset += attr_length + padding;
     }

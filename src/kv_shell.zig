@@ -123,49 +123,98 @@ fn readLine(allocator: std.mem.Allocator, history: *CommandHistory, terminal: *T
 
         if (c == '\n' or c == '\r') {
             try stdout.writeAll("\r\n");
-            const result = try buffer.toOwnedSlice(allocator);
-            return result;
-        } else if (c == 127 or c == 8) {
-            if (cursor_pos > 0) {
-                cursor_pos -= 1;
-                buffer.items.len -= 1;
-                try stdout.writeAll("\x08 \x08");
-            }
-        } else if (c == 4) {
-            // Ctrl+D
+            return try buffer.toOwnedSlice(allocator);
+        }
+
+        if (c == 127 or c == 8) {
+            try handleBackspace(&buffer, &cursor_pos, stdout);
+            continue;
+        }
+
+        if (c == 4) {
             if (buffer.items.len == 0) {
                 return null;
             }
-        } else if (c == 27) {
-            const seq = stdin_reader.interface.peek(2) catch continue;
-            if (seq.len < 2) continue;
+            continue;
+        }
 
-            if (seq[0] == '[') {
-                _ = try stdin_reader.interface.discard(@enumFromInt(2));
+        if (c == 27) {
+            try handleEscapeSequence(&stdin_reader, history, &buffer, &cursor_pos, stdout, allocator);
+            continue;
+        }
 
-                if (seq[1] == 'A') {
-                    if (history.moveUp()) |line| {
-                        try stdout.writeAll("\r\x1b[K> ");
-                        try stdout.writeAll(line);
-                        buffer.clearRetainingCapacity();
-                        try buffer.appendSlice(allocator, line);
-                        cursor_pos = line.len;
-                    }
-                } else if (seq[1] == 'B') {
-                    const line = history.moveDown() orelse "";
-                    try stdout.writeAll("\r\x1b[K> ");
-                    try stdout.writeAll(line);
-                    buffer.clearRetainingCapacity();
-                    try buffer.appendSlice(allocator, line);
-                    cursor_pos = line.len;
-                }
-            }
-        } else if (c >= 32 and c < 127) {
-            try buffer.append(allocator, c);
-            try stdout.writeAll(&[_]u8{c});
-            cursor_pos += 1;
+        if (c >= 32 and c < 127) {
+            try handlePrintableChar(c, &buffer, &cursor_pos, stdout, allocator);
+            continue;
         }
     }
+}
+
+fn handleBackspace(buffer: *std.ArrayList(u8), cursor_pos: *usize, stdout: anytype) !void {
+    if (cursor_pos.* == 0) {
+        return;
+    }
+
+    cursor_pos.* -= 1;
+    buffer.items.len -= 1;
+    try stdout.writeAll("\x08 \x08");
+}
+
+fn handleEscapeSequence(
+    stdin_reader: anytype,
+    history: *CommandHistory,
+    buffer: *std.ArrayList(u8),
+    cursor_pos: *usize,
+    stdout: anytype,
+    allocator: std.mem.Allocator,
+) !void {
+    const seq = stdin_reader.interface.peek(2) catch return;
+    if (seq.len < 2) return;
+    if (seq[0] != '[') return;
+
+    _ = try stdin_reader.interface.discard(@enumFromInt(2));
+
+    if (seq[1] == 'A') {
+        try handleArrowUp(history, buffer, cursor_pos, stdout, allocator);
+    } else if (seq[1] == 'B') {
+        try handleArrowDown(history, buffer, cursor_pos, stdout, allocator);
+    }
+}
+
+fn handleArrowUp(
+    history: *CommandHistory,
+    buffer: *std.ArrayList(u8),
+    cursor_pos: *usize,
+    stdout: anytype,
+    allocator: std.mem.Allocator,
+) !void {
+    const line = history.moveUp() orelse return;
+    try stdout.writeAll("\r\x1b[K> ");
+    try stdout.writeAll(line);
+    buffer.clearRetainingCapacity();
+    try buffer.appendSlice(allocator, line);
+    cursor_pos.* = line.len;
+}
+
+fn handleArrowDown(
+    history: *CommandHistory,
+    buffer: *std.ArrayList(u8),
+    cursor_pos: *usize,
+    stdout: anytype,
+    allocator: std.mem.Allocator,
+) !void {
+    const line = history.moveDown() orelse "";
+    try stdout.writeAll("\r\x1b[K> ");
+    try stdout.writeAll(line);
+    buffer.clearRetainingCapacity();
+    try buffer.appendSlice(allocator, line);
+    cursor_pos.* = line.len;
+}
+
+fn handlePrintableChar(c: u8, buffer: *std.ArrayList(u8), cursor_pos: *usize, stdout: anytype, allocator: std.mem.Allocator) !void {
+    try buffer.append(allocator, c);
+    try stdout.writeAll(&[_]u8{c});
+    cursor_pos.* += 1;
 }
 
 fn saveKVStore(allocator: std.mem.Allocator, store: *kv.KVStore, dir_path: []const u8) !void {
@@ -212,11 +261,7 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
 
     const stdout = std.fs.File.stdout();
 
-    const connect_msg = try std.fmt.allocPrint(allocator, "Connected to KV store at '{s}'\r\n", .{path});
-    defer allocator.free(connect_msg);
-    try stdout.writeAll(connect_msg);
-    try stdout.writeAll("Commands: get <key>, put <key> <value>, delete <key>, list, count, help, exit\r\n");
-    try stdout.writeAll("Press Ctrl+D to save and exit\r\n\r\n");
+    try printWelcome(allocator, stdout, path);
 
     var terminal = try TerminalState.init();
     try terminal.enableRawMode();
@@ -248,107 +293,157 @@ pub fn run(allocator: std.mem.Allocator, path: []const u8) !void {
             try saveKVStore(allocator, &store, path);
             try stdout.writeAll("Saved and exiting.\r\n");
             break;
-        } else if (std.mem.eql(u8, cmd, "help")) {
-            try stdout.writeAll("Commands:\r\n");
-            try stdout.writeAll("  get <key>              Get value for key\r\n");
-            try stdout.writeAll("  put <key> <value>      Set key to value\r\n");
-            try stdout.writeAll("  delete <key>           Delete key\r\n");
-            try stdout.writeAll("  list                   List all keys\r\n");
-            try stdout.writeAll("  count                  Show number of keys\r\n");
-            try stdout.writeAll("  help                   Show this help\r\n");
-            try stdout.writeAll("  exit                   Save and exit\r\n");
-        } else if (std.mem.eql(u8, cmd, "get")) {
-            const key = parts.rest();
-            if (key.len == 0) {
-                try stdout.writeAll("Error: get requires a key\r\n");
-                continue;
-            }
+        }
 
-            const value = store.get(allocator, key) catch |err| {
-                if (err == kv.KVError.KeyNotFound) {
-                    const msg = try std.fmt.allocPrint(allocator, "Key not found: {s}\r\n", .{key});
-                    defer allocator.free(msg);
-                    try stdout.writeAll(msg);
-                } else {
-                    const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
-                    defer allocator.free(msg);
-                    try stdout.writeAll(msg);
-                }
-                continue;
-            };
-            defer allocator.free(value);
+        if (std.mem.eql(u8, cmd, "help")) {
+            try handleHelpCommand(stdout);
+            continue;
+        }
 
-            try stdout.writeAll(value);
-            try stdout.writeAll("\r\n");
-        } else if (std.mem.eql(u8, cmd, "put")) {
-            const key_start = std.mem.indexOfScalar(u8, trimmed, ' ') orelse {
-                try stdout.writeAll("Error: put requires a key and value\r\n");
-                continue;
-            };
+        if (std.mem.eql(u8, cmd, "get")) {
+            try handleGetCommand(allocator, &store, &parts, stdout);
+            continue;
+        }
 
-            const remainder = trimmed[key_start + 1 ..];
-            const value_start = std.mem.indexOfScalar(u8, remainder, ' ') orelse {
-                try stdout.writeAll("Error: put requires a key and value\r\n");
-                continue;
-            };
+        if (std.mem.eql(u8, cmd, "put")) {
+            try handlePutCommand(allocator, &store, trimmed, stdout);
+            continue;
+        }
 
-            const key = std.mem.trim(u8, remainder[0..value_start], " ");
-            const value = std.mem.trim(u8, remainder[value_start + 1 ..], " ");
+        if (std.mem.eql(u8, cmd, "delete")) {
+            try handleDeleteCommand(allocator, &store, &parts, stdout);
+            continue;
+        }
 
-            if (key.len == 0 or value.len == 0) {
-                try stdout.writeAll("Error: put requires a key and value\r\n");
-                continue;
-            }
+        if (std.mem.eql(u8, cmd, "list")) {
+            try handleListCommand(allocator, &store, stdout);
+            continue;
+        }
 
-            store.put(key, value) catch |err| {
-                const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
-                defer allocator.free(msg);
-                try stdout.writeAll(msg);
-                continue;
-            };
+        if (std.mem.eql(u8, cmd, "count")) {
+            try handleCountCommand(allocator, &store, stdout);
+            continue;
+        }
 
-            try stdout.writeAll("OK\r\n");
-        } else if (std.mem.eql(u8, cmd, "delete")) {
-            const key = parts.rest();
-            if (key.len == 0) {
-                try stdout.writeAll("Error: delete requires a key\r\n");
-                continue;
-            }
+        const msg = try std.fmt.allocPrint(allocator, "Unknown command: {s} (type 'help' for commands)\r\n", .{cmd});
+        defer allocator.free(msg);
+        try stdout.writeAll(msg);
+    }
+}
 
-            store.delete(key) catch |err| {
-                if (err == kv.KVError.KeyNotFound) {
-                    const msg = try std.fmt.allocPrint(allocator, "Key not found: {s}\r\n", .{key});
-                    defer allocator.free(msg);
-                    try stdout.writeAll(msg);
-                } else {
-                    const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
-                    defer allocator.free(msg);
-                    try stdout.writeAll(msg);
-                }
-                continue;
-            };
+fn printWelcome(allocator: std.mem.Allocator, stdout: anytype, path: []const u8) !void {
+    const connect_msg = try std.fmt.allocPrint(allocator, "Connected to KV store at '{s}'\r\n", .{path});
+    defer allocator.free(connect_msg);
+    try stdout.writeAll(connect_msg);
+    try stdout.writeAll("Commands: get <key>, put <key> <value>, delete <key>, list, count, help, exit\r\n");
+    try stdout.writeAll("Press Ctrl+D to save and exit\r\n\r\n");
+}
 
-            try stdout.writeAll("OK\r\n");
-        } else if (std.mem.eql(u8, cmd, "list")) {
-            var it = store.kv_state.map.iterator();
-            var count: usize = 0;
-            while (it.next()) |entry| {
-                const msg = try std.fmt.allocPrint(allocator, "{s} = {s}\r\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                defer allocator.free(msg);
-                try stdout.writeAll(msg);
-                count += 1;
-            }
-            if (count == 0) {
-                try stdout.writeAll("(empty)\r\n");
-            }
-        } else if (std.mem.eql(u8, cmd, "count")) {
-            const msg = try std.fmt.allocPrint(allocator, "{} keys\r\n", .{store.count()});
+fn handleHelpCommand(stdout: anytype) !void {
+    try stdout.writeAll("Commands:\r\n");
+    try stdout.writeAll("  get <key>              Get value for key\r\n");
+    try stdout.writeAll("  put <key> <value>      Set key to value\r\n");
+    try stdout.writeAll("  delete <key>           Delete key\r\n");
+    try stdout.writeAll("  list                   List all keys\r\n");
+    try stdout.writeAll("  count                  Show number of keys\r\n");
+    try stdout.writeAll("  help                   Show this help\r\n");
+    try stdout.writeAll("  exit                   Save and exit\r\n");
+}
+
+fn handleGetCommand(allocator: std.mem.Allocator, store: *kv.KVStore, parts: anytype, stdout: anytype) !void {
+    const key = parts.rest();
+    if (key.len == 0) {
+        try stdout.writeAll("Error: get requires a key\r\n");
+        return;
+    }
+
+    const value = store.get(allocator, key) catch |err| {
+        if (err == kv.KVError.KeyNotFound) {
+            const msg = try std.fmt.allocPrint(allocator, "Key not found: {s}\r\n", .{key});
             defer allocator.free(msg);
             try stdout.writeAll(msg);
         } else {
-            const msg = try std.fmt.allocPrint(allocator, "Unknown command: {s} (type 'help' for commands)\r\n", .{cmd});
+            const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
             defer allocator.free(msg);
             try stdout.writeAll(msg);
         }
+        return;
+    };
+    defer allocator.free(value);
+
+    try stdout.writeAll(value);
+    try stdout.writeAll("\r\n");
+}
+
+fn handlePutCommand(allocator: std.mem.Allocator, store: *kv.KVStore, trimmed: []const u8, stdout: anytype) !void {
+    const key_start = std.mem.indexOfScalar(u8, trimmed, ' ') orelse {
+        try stdout.writeAll("Error: put requires a key and value\r\n");
+        return;
+    };
+
+    const remainder = trimmed[key_start + 1 ..];
+    const value_start = std.mem.indexOfScalar(u8, remainder, ' ') orelse {
+        try stdout.writeAll("Error: put requires a key and value\r\n");
+        return;
+    };
+
+    const key = std.mem.trim(u8, remainder[0..value_start], " ");
+    const value = std.mem.trim(u8, remainder[value_start + 1 ..], " ");
+
+    if (key.len == 0 or value.len == 0) {
+        try stdout.writeAll("Error: put requires a key and value\r\n");
+        return;
     }
+
+    store.put(key, value) catch |err| {
+        const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
+        defer allocator.free(msg);
+        try stdout.writeAll(msg);
+        return;
+    };
+
+    try stdout.writeAll("OK\r\n");
+}
+
+fn handleDeleteCommand(allocator: std.mem.Allocator, store: *kv.KVStore, parts: anytype, stdout: anytype) !void {
+    const key = parts.rest();
+    if (key.len == 0) {
+        try stdout.writeAll("Error: delete requires a key\r\n");
+        return;
+    }
+
+    store.delete(key) catch |err| {
+        if (err == kv.KVError.KeyNotFound) {
+            const msg = try std.fmt.allocPrint(allocator, "Key not found: {s}\r\n", .{key});
+            defer allocator.free(msg);
+            try stdout.writeAll(msg);
+        } else {
+            const msg = try std.fmt.allocPrint(allocator, "Error: {}\r\n", .{err});
+            defer allocator.free(msg);
+            try stdout.writeAll(msg);
+        }
+        return;
+    };
+
+    try stdout.writeAll("OK\r\n");
+}
+
+fn handleListCommand(allocator: std.mem.Allocator, store: *kv.KVStore, stdout: anytype) !void {
+    var it = store.kv_state.map.iterator();
+    var count: usize = 0;
+    while (it.next()) |entry| {
+        const msg = try std.fmt.allocPrint(allocator, "{s} = {s}\r\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+        defer allocator.free(msg);
+        try stdout.writeAll(msg);
+        count += 1;
+    }
+    if (count == 0) {
+        try stdout.writeAll("(empty)\r\n");
+    }
+}
+
+fn handleCountCommand(allocator: std.mem.Allocator, store: *kv.KVStore, stdout: anytype) !void {
+    const msg = try std.fmt.allocPrint(allocator, "{} keys\r\n", .{store.count()});
+    defer allocator.free(msg);
+    try stdout.writeAll(msg);
 }

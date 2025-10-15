@@ -233,7 +233,7 @@ pub fn Node(comptime T: type) type {
 
             const log_is_up_to_date = request.last_log_term > our_last_log_term or
                 (request.last_log_term == our_last_log_term and
-                request.last_log_index >= our_last_log_index);
+                    request.last_log_index >= our_last_log_index);
 
             if (!log_is_up_to_date) {
                 return .{
@@ -253,7 +253,6 @@ pub fn Node(comptime T: type) type {
 
         // Handle AppendEntries RPC
         pub fn handleAppendEntries(self: *Self, request: rpc.AppendEntriesRequest) !rpc.AppendEntriesResponse {
-            // If request term is stale, reject
             if (request.term < self.persistent_state.current_term) {
                 return .{
                     .term = self.persistent_state.current_term,
@@ -262,31 +261,21 @@ pub fn Node(comptime T: type) type {
                 };
             }
 
-            // If request term is higher or equal, become/stay follower
             if (request.term >= self.persistent_state.current_term) {
                 self.becomeFollower(request.term);
                 self.current_leader = request.leader_id;
             }
 
-            // Check if our log contains an entry at prev_log_index with prev_log_term
-            if (request.prev_log_index > 0) {
-                const prev_entry = self.persistent_state.getEntry(request.prev_log_index);
-                if (prev_entry == null or prev_entry.?.term != request.prev_log_term) {
-                    return .{
-                        .term = self.persistent_state.current_term,
-                        .success = false,
-                        .match_index = 0,
-                    };
-                }
+            if (!try self.validatePrevLogEntry(request.prev_log_index, request.prev_log_term)) {
+                return .{
+                    .term = self.persistent_state.current_term,
+                    .success = false,
+                    .match_index = 0,
+                };
             }
 
-            // If this is a heartbeat (no entries), just update commit index
             if (request.entries.len == 0) {
-                if (request.leader_commit > self.volatile_state.commit_index) {
-                    const new_commit = @min(request.leader_commit, self.persistent_state.getLastLogIndex());
-                    self.volatile_state.updateCommitIndex(new_commit);
-                    try self.applyCommittedEntries();
-                }
+                try self.updateCommitIndexFromLeader(request.leader_commit);
                 return .{
                     .term = self.persistent_state.current_term,
                     .success = true,
@@ -294,32 +283,50 @@ pub fn Node(comptime T: type) type {
                 };
             }
 
-            // Append new entries
-            for (request.entries) |entry| {
-                const existing = self.persistent_state.getEntry(entry.index);
-                if (existing != null and existing.?.term != entry.term) {
-                    // Conflict: delete existing entry and all that follow
-                    try self.persistent_state.truncateLogAfter(entry.index - 1);
-                }
-
-                // Append entry if not already present
-                if (self.persistent_state.getEntry(entry.index) == null) {
-                    _ = try self.persistent_state.appendEntry(entry.term, entry.entry_type, entry.data);
-                }
-            }
-
-            // Update commit index
-            if (request.leader_commit > self.volatile_state.commit_index) {
-                const new_commit = @min(request.leader_commit, self.persistent_state.getLastLogIndex());
-                self.volatile_state.updateCommitIndex(new_commit);
-                try self.applyCommittedEntries();
-            }
+            try self.appendNewEntries(request.entries);
+            try self.updateCommitIndexFromLeader(request.leader_commit);
 
             return .{
                 .term = self.persistent_state.current_term,
                 .success = true,
                 .match_index = self.persistent_state.getLastLogIndex(),
             };
+        }
+
+        fn validatePrevLogEntry(self: *Self, prev_log_index: types.LogIndex, prev_log_term: types.Term) !bool {
+            if (prev_log_index == 0) {
+                return true;
+            }
+
+            const prev_entry = self.persistent_state.getEntry(prev_log_index);
+            if (prev_entry == null) {
+                return false;
+            }
+
+            return prev_entry.?.term == prev_log_term;
+        }
+
+        fn updateCommitIndexFromLeader(self: *Self, leader_commit: types.LogIndex) !void {
+            if (leader_commit <= self.volatile_state.commit_index) {
+                return;
+            }
+
+            const new_commit = @min(leader_commit, self.persistent_state.getLastLogIndex());
+            self.volatile_state.updateCommitIndex(new_commit);
+            try self.applyCommittedEntries();
+        }
+
+        fn appendNewEntries(self: *Self, entries: []const types.LogEntry) !void {
+            for (entries) |entry| {
+                const existing = self.persistent_state.getEntry(entry.index);
+                if (existing != null and existing.?.term != entry.term) {
+                    try self.persistent_state.truncateLogAfter(entry.index - 1);
+                }
+
+                if (self.persistent_state.getEntry(entry.index) == null) {
+                    _ = try self.persistent_state.appendEntry(entry.term, entry.entry_type, entry.data);
+                }
+            }
         }
 
         // Apply committed entries to state machine
@@ -353,95 +360,122 @@ pub fn Node(comptime T: type) type {
             var actions = actions_mod.ActionList.init(self.allocator);
 
             switch (self.node_state) {
-                .follower, .candidate => {
-                    // Check if election timeout has expired
-                    if (now >= self.election_deadline) {
-                        try self.becomeCandidate();
-                        self.election_deadline = now + self.timing_config.randomElectionTimeout(self.rng);
-
-                        // Send RequestVote to all other nodes
-                        const last_log_index = self.persistent_state.getLastLogIndex();
-                        const last_log_term = self.persistent_state.getLastLogTerm();
-
-                        for (self.cluster_config.nodes) |node| {
-                            if (node.id != self.node_id) {
-                                try actions.append(.{
-                                    .send_request_vote = .{
-                                        .node_id = node.id,
-                                        .request = .{
-                                            .term = self.persistent_state.current_term,
-                                            .candidate_id = self.node_id,
-                                            .last_log_index = last_log_index,
-                                            .last_log_term = last_log_term,
-                                        },
-                                    },
-                                });
-                            }
-                        }
-                    }
-                },
-                .leader => {
-                    // Send heartbeats/replication messages
-                    if (now >= self.last_heartbeat_time + self.timing_config.heartbeat_interval) {
-                        self.last_heartbeat_time = now;
-
-                        // Send AppendEntries to each follower
-                        if (self.leader_state) |*ls| {
-                            for (self.cluster_config.nodes) |node| {
-                                if (node.id != self.node_id) {
-                                    const next_index = ls.getNextIndex(node.id) orelse continue;
-                                    const prev_log_index = if (next_index > 1) next_index - 1 else 0;
-                                    const prev_log_term = if (prev_log_index > 0)
-                                        self.persistent_state.getEntry(prev_log_index).?.term
-                                    else
-                                        0;
-
-                                    // Collect entries to send
-                                    var entries = std.ArrayList(types.LogEntry).init(self.allocator);
-                                    defer entries.deinit();
-
-                                    const last_log_index = self.persistent_state.getLastLogIndex();
-                                    if (next_index <= last_log_index) {
-                                        var idx = next_index;
-                                        while (idx <= last_log_index and entries.items.len < self.timing_config.max_entries_per_rpc) {
-                                            const entry = self.persistent_state.getEntry(idx).?;
-                                            try entries.append(entry);
-                                            idx += 1;
-                                        }
-                                    }
-
-                                    try actions.append(.{
-                                        .send_append_entries = .{
-                                            .node_id = node.id,
-                                            .request = .{
-                                                .term = self.persistent_state.current_term,
-                                                .leader_id = self.node_id,
-                                                .prev_log_index = prev_log_index,
-                                                .prev_log_term = prev_log_term,
-                                                .entries = try self.allocator.dupe(types.LogEntry, entries.items),
-                                                .leader_commit = self.volatile_state.commit_index,
-                                            },
-                                        },
-                                    });
-                                }
-                            }
-                        }
-
-                        // Update commit index based on quorum
-                        try self.updateCommitIndex();
-                    }
-                },
+                .follower, .candidate => try self.tickFollowerOrCandidate(now, &actions),
+                .leader => try self.tickLeader(now, &actions),
             }
 
             // Schedule next tick
-            const next_tick_delay = if (self.node_state == .leader)
-                self.timing_config.heartbeat_interval
-            else
-                @min(self.timing_config.heartbeat_interval, self.election_deadline -| now);
-
+            const next_tick_delay = self.calculateNextTickDelay(now);
             try actions.append(.{ .schedule_tick = next_tick_delay });
 
             return actions;
+        }
+
+        fn calculateNextTickDelay(self: *Self, now: u64) u64 {
+            if (self.node_state == .leader) {
+                return self.timing_config.heartbeat_interval;
+            }
+            return @min(self.timing_config.heartbeat_interval, self.election_deadline -| now);
+        }
+
+        fn tickFollowerOrCandidate(self: *Self, now: u64, actions: *actions_mod.ActionList) !void {
+            if (now < self.election_deadline) {
+                return;
+            }
+
+            try self.becomeCandidate();
+            self.election_deadline = now + self.timing_config.randomElectionTimeout(self.rng);
+
+            const last_log_index = self.persistent_state.getLastLogIndex();
+            const last_log_term = self.persistent_state.getLastLogTerm();
+
+            for (self.cluster_config.nodes) |node| {
+                if (node.id == self.node_id) {
+                    continue;
+                }
+
+                try actions.append(.{
+                    .send_request_vote = .{
+                        .node_id = node.id,
+                        .request = .{
+                            .term = self.persistent_state.current_term,
+                            .candidate_id = self.node_id,
+                            .last_log_index = last_log_index,
+                            .last_log_term = last_log_term,
+                        },
+                    },
+                });
+            }
+        }
+
+        fn tickLeader(self: *Self, now: u64, actions: *actions_mod.ActionList) !void {
+            if (now < self.last_heartbeat_time + self.timing_config.heartbeat_interval) {
+                return;
+            }
+
+            self.last_heartbeat_time = now;
+
+            const ls = &(self.leader_state orelse return);
+
+            for (self.cluster_config.nodes) |node| {
+                if (node.id == self.node_id) {
+                    continue;
+                }
+
+                try self.buildAndSendAppendEntries(node.id, ls, actions);
+            }
+
+            try self.updateCommitIndex();
+        }
+
+        fn buildAndSendAppendEntries(
+            self: *Self,
+            node_id: types.NodeId,
+            ls: *state_mod.LeaderState,
+            actions: *actions_mod.ActionList,
+        ) !void {
+            const next_index = ls.getNextIndex(node_id) orelse return;
+            const prev_log_index = if (next_index > 1) next_index - 1 else 0;
+            const prev_log_term = if (prev_log_index > 0)
+                self.persistent_state.getEntry(prev_log_index).?.term
+            else
+                0;
+
+            const entries = try self.collectEntriesToSend(next_index);
+            defer self.allocator.free(entries);
+
+            try actions.append(.{
+                .send_append_entries = .{
+                    .node_id = node_id,
+                    .request = .{
+                        .term = self.persistent_state.current_term,
+                        .leader_id = self.node_id,
+                        .prev_log_index = prev_log_index,
+                        .prev_log_term = prev_log_term,
+                        .entries = entries,
+                        .leader_commit = self.volatile_state.commit_index,
+                    },
+                },
+            });
+        }
+
+        fn collectEntriesToSend(self: *Self, start_index: types.LogIndex) ![]types.LogEntry {
+            const last_log_index = self.persistent_state.getLastLogIndex();
+            if (start_index > last_log_index) {
+                return try self.allocator.alloc(types.LogEntry, 0);
+            }
+
+            var entries = std.ArrayList(types.LogEntry).init(self.allocator);
+            defer entries.deinit();
+
+            var idx = start_index;
+            while (idx <= last_log_index and entries.items.len < self.timing_config.max_entries_per_rpc) {
+                const entry = self.persistent_state.getEntry(idx).?;
+                try entries.append(entry);
+                idx += 1;
+            }
+
+            return try self.allocator.dupe(types.LogEntry, entries.items);
         }
 
         // Update commit index based on matchIndex quorum (leader only)
@@ -452,28 +486,15 @@ pub fn Node(comptime T: type) type {
             const ls = &self.leader_state.?;
             const last_log_index = self.persistent_state.getLastLogIndex();
 
-            // Try each index from current commit to last log
             var n = self.volatile_state.commit_index + 1;
             while (n <= last_log_index) : (n += 1) {
                 const entry = self.persistent_state.getEntry(n).?;
 
-                // Only commit entries from current term
                 if (entry.term != self.persistent_state.current_term) {
                     continue;
                 }
 
-                // Count replicas (including self)
-                var replicas: usize = 1;
-                for (self.cluster_config.nodes) |node| {
-                    if (node.id == self.node_id) continue;
-
-                    const match_index = ls.getMatchIndex(node.id) orelse 0;
-                    if (match_index >= n) {
-                        replicas += 1;
-                    }
-                }
-
-                // Check if we have quorum
+                const replicas = self.countReplicasForIndex(n, ls);
                 if (replicas >= self.cluster_config.quorumSize()) {
                     self.volatile_state.updateCommitIndex(n);
                     try self.applyCommittedEntries();
@@ -481,6 +502,21 @@ pub fn Node(comptime T: type) type {
                     break;
                 }
             }
+        }
+
+        fn countReplicasForIndex(self: *Self, index: types.LogIndex, ls: *state_mod.LeaderState) usize {
+            var replicas: usize = 1;
+            for (self.cluster_config.nodes) |node| {
+                if (node.id == self.node_id) {
+                    continue;
+                }
+
+                const match_index = ls.getMatchIndex(node.id) orelse 0;
+                if (match_index >= index) {
+                    replicas += 1;
+                }
+            }
+            return replicas;
         }
 
         // Handle AppendEntries response (leader only)

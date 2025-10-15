@@ -28,10 +28,13 @@ pub fn queryPublicAddress(
 
     log.debug("Resolved {} address(es) for {s}", .{ address_list.addrs.len, server_host });
 
-    // Try each IPv4 address until one works (skip IPv6)
+    return try tryAddresses(address_list.addrs, server_host);
+}
+
+fn tryAddresses(addresses: []const net.Address, server_host: []const u8) !core_types.IpAddress {
     var last_error: anyerror = error.UnknownHostName;
-    for (address_list.addrs) |server_address| {
-        // Skip IPv6 addresses
+
+    for (addresses) |server_address| {
         if (server_address.any.family != posix.AF.INET) {
             log.debug("Skipping non-IPv4 address", .{});
             continue;
@@ -81,18 +84,7 @@ fn queryWithAddress(server_address: net.Address) !core_types.IpAddress {
         _ = try posix.send(socket, request_buffer[0..request_size], 0);
 
         const timeout_ms = client.calculateRetryDelay(attempt);
-
-        const received_bytes = receiveWithTimeout(
-            socket,
-            &response_buffer,
-            timeout_ms,
-        ) catch |err| {
-            if (err == error.Timeout and attempt < MAX_RETRIES - 1) {
-                log.debug("Request timed out, retrying...", .{});
-                continue;
-            }
-            return err;
-        };
+        const received_bytes = try receiveResponse(socket, &response_buffer, timeout_ms, attempt);
 
         if (received_bytes == 0) {
             if (attempt < MAX_RETRIES - 1) {
@@ -101,33 +93,44 @@ fn queryWithAddress(server_address: net.Address) !core_types.IpAddress {
             return error.NoResponse;
         }
 
-        const public_address = client.extractPublicAddress(
-            response_buffer[0..received_bytes],
-            transaction_id,
-        ) catch |err| {
-            // Only retry on transaction ID mismatch (might be stale response)
-            // Don't retry on parsing errors or invalid message types
-            if (err == core_types.StunError.TransactionIdMismatch and attempt < MAX_RETRIES - 1) {
-                log.debug("Transaction ID mismatch, retrying...", .{});
-                continue;
-            }
-            return err;
-        };
-
-        if (public_address) |addr| {
+        if (try processResponse(&response_buffer, received_bytes, transaction_id, attempt)) |addr| {
             return addr;
         }
 
-        // No XOR-MAPPED-ADDRESS attribute found, retry
-        if (attempt < MAX_RETRIES - 1) {
-            log.debug("No XOR-MAPPED-ADDRESS attribute found, retrying...", .{});
-            continue;
+        if (attempt >= MAX_RETRIES - 1) {
+            return error.NoAddressAttribute;
         }
-        return error.NoAddressAttribute;
+        log.debug("No XOR-MAPPED-ADDRESS attribute found, retrying...", .{});
     }
 
     log.err("Max retries exceeded", .{});
     return error.MaxRetriesExceeded;
+}
+
+fn receiveResponse(socket: posix.socket_t, buffer: *[BUFFER_SIZE]u8, timeout_ms: u64, attempt: u32) !usize {
+    const received_bytes = receiveWithTimeout(socket, buffer, timeout_ms) catch |err| {
+        if (err == error.Timeout and attempt < MAX_RETRIES - 1) {
+            log.debug("Request timed out, retrying...", .{});
+            return 0;
+        }
+        return err;
+    };
+    return received_bytes;
+}
+
+fn processResponse(buffer: *[BUFFER_SIZE]u8, received_bytes: usize, transaction_id: [12]u8, attempt: u32) !?core_types.IpAddress {
+    const public_address = client.extractPublicAddress(
+        buffer[0..received_bytes],
+        transaction_id,
+    ) catch |err| {
+        if (err == core_types.StunError.TransactionIdMismatch and attempt < MAX_RETRIES - 1) {
+            log.debug("Transaction ID mismatch, retrying...", .{});
+            return null;
+        }
+        return err;
+    };
+
+    return public_address;
 }
 
 fn extractIpAddress(address: net.Address) core_types.IpAddress {
