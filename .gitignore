@@ -1,0 +1,22 @@
+# Zig build artifacts
+.zig-cache/
+zig-out/
+zig-cache/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.test
+
+# Debug files
+*.dSYM/
+*.pdb
