@@ -29,33 +29,7 @@ const adjectives = [_][]const u8{
     "fearless",
 };
 
-const nouns = [_][]const u8{
-    "warrior",
-    "commando",
-    "predator",
-    "terminator",
-    "destroyer",
-    "berserker",
-    "gladiator",
-    "spartan",
-    "samurai",
-    "ninja",
-    "viking",
-    "crusader",
-    "centurion",
-    "titan",
-    "juggernaut",
-    "warlord",
-    "champion",
-    "hunter",
-    "reaper",
-    "renegade",
-    "maverick",
-    "vanguard",
-    "sentinel",
-    "guardian",
-    "avenger",
-};
+const nouns = [_][]const u8{ "warrior", "commando", "predator", "terminator", "destroyer", "berserker", "gladiator", "spartan", "samurai", "ninja", "viking", "crusader", "centurion", "titan", "juggernaut", "warlord", "champion", "hunter", "reaper", "renegade", "maverick", "vanguard", "sentinel", "guardian", "avenger", "house" };
 
 pub const NameGeneratorError = error{
     EmptyPrefix,
