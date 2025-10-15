@@ -109,4 +109,8 @@ pub const StunError = error{
     MessageTooShort,
     AttributeTooShort,
     BufferTooSmall,
+    TransactionIdMismatch,
 };
+
+// Maximum allowed STUN message length (RFC 5389 suggests reasonable bounds)
+pub const MAX_MESSAGE_LENGTH: usize = 65535;

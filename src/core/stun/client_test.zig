@@ -60,7 +60,7 @@ test "extractPublicAddress - transaction id mismatch" {
 
     // Try to extract with a different transaction ID
     try testing.expectError(
-        types.StunError.InvalidMessageType,
+        types.StunError.TransactionIdMismatch,
         client.extractPublicAddress(response[0..response_size], wrong_transaction_id),
     );
 }

@@ -73,9 +73,8 @@ pub const Server = struct {
                 client_address,
                 response_buffer,
             ) catch |err| {
-                var buf: [64]u8 = undefined;
-                const addr_str = formatNetAddress(client_address, &buf);
-                log.err("Error handling request from {s}: {}", .{ addr_str, err });
+                const client_ip = extractIpAddress(client_address);
+                log.err("Error handling request from {any}: {}", .{ client_ip, err });
             };
         }
     }
@@ -86,15 +85,12 @@ pub const Server = struct {
         client_address: net.Address,
         response_buffer: []u8,
     ) !void {
-        var addr_buf: [64]u8 = undefined;
-        const client_addr_str = formatNetAddress(client_address, &addr_buf);
+        const client_ip = extractIpAddress(client_address);
 
         if (!server.isValidBindingRequest(request_data)) {
-            log.debug("Received invalid STUN request from {s}", .{client_addr_str});
+            log.debug("Received invalid STUN request from {any}", .{client_ip});
             return;
         }
-
-        const client_ip = extractIpAddress(client_address);
 
         const response_size = try server.processBindingRequest(
             request_data,
@@ -110,7 +106,7 @@ pub const Server = struct {
             client_address.getOsSockLen(),
         );
 
-        log.debug("Responded to {s} with their public address: {}", .{ client_addr_str, client_ip });
+        log.debug("Responded to {any} with their public address", .{client_ip});
     }
 };
 
@@ -136,39 +132,6 @@ fn extractIpAddress(address: net.Address) core_types.IpAddress {
             };
         },
         else => unreachable,
-    }
-}
-
-fn formatNetAddress(address: net.Address, buffer: []u8) []const u8 {
-    switch (address.any.family) {
-        posix.AF.INET => {
-            const ipv4 = address.in;
-            const addr_bytes = std.mem.toBytes(ipv4.sa.addr);
-            const port = std.mem.bigToNative(u16, ipv4.sa.port);
-            return std.fmt.bufPrint(buffer, "{}.{}.{}.{}:{}", .{
-                addr_bytes[0],
-                addr_bytes[1],
-                addr_bytes[2],
-                addr_bytes[3],
-                port,
-            }) catch "invalid";
-        },
-        posix.AF.INET6 => {
-            const ipv6 = address.in6;
-            const port = std.mem.bigToNative(u16, ipv6.sa.port);
-            return std.fmt.bufPrint(buffer, "[{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}]:{}", .{
-                ipv6.sa.addr[0],  ipv6.sa.addr[1],
-                ipv6.sa.addr[2],  ipv6.sa.addr[3],
-                ipv6.sa.addr[4],  ipv6.sa.addr[5],
-                ipv6.sa.addr[6],  ipv6.sa.addr[7],
-                ipv6.sa.addr[8],  ipv6.sa.addr[9],
-                ipv6.sa.addr[10], ipv6.sa.addr[11],
-                ipv6.sa.addr[12], ipv6.sa.addr[13],
-                ipv6.sa.addr[14], ipv6.sa.addr[15],
-                port,
-            }) catch "invalid";
-        },
-        else => return "unknown",
     }
 }
 

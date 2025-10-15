@@ -13,6 +13,11 @@ pub fn parseHeader(data: []const u8) !types.MessageHeader {
     };
 
     const message_length = std.mem.readInt(u16, data[2..4], .big);
+
+    if (message_length > types.MAX_MESSAGE_LENGTH) {
+        return types.StunError.InvalidMessageLength;
+    }
+
     const magic_cookie = std.mem.readInt(u32, data[4..8], .big);
 
     if (magic_cookie != types.MAGIC_COOKIE) {
@@ -214,6 +219,14 @@ pub fn parseXorMappedAddress(data: []const u8, transaction_id: [12]u8) !?types.I
     const header = try parseHeader(data);
     if (header.message_type != .binding_response) {
         return types.StunError.InvalidMessageType;
+    }
+
+    if (header.message_length > types.MAX_MESSAGE_LENGTH) {
+        return types.StunError.InvalidMessageLength;
+    }
+
+    if (header.message_length > data.len - types.MessageHeader.SIZE) {
+        return types.StunError.InvalidMessageLength;
     }
 
     var offset: usize = types.MessageHeader.SIZE;

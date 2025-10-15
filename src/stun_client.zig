@@ -37,12 +37,11 @@ pub fn queryPublicAddress(
             continue;
         }
 
-        var buf: [64]u8 = undefined;
-        const addr_str = formatAddress(server_address, &buf);
-        log.debug("Trying {s}", .{addr_str});
+        const ip_addr = extractIpAddress(server_address);
+        log.debug("Trying {any}", .{ip_addr});
 
         const result = queryWithAddress(server_address) catch |err| {
-            log.debug("Failed with {s}: {}", .{ addr_str, err });
+            log.debug("Failed with {any}: {}", .{ ip_addr, err });
             last_error = err;
             continue;
         };
@@ -81,7 +80,7 @@ fn queryWithAddress(server_address: net.Address) !core_types.IpAddress {
 
         _ = try posix.send(socket, request_buffer[0..request_size], 0);
 
-        const timeout_ms = if (attempt == 0) DEFAULT_TIMEOUT_MS else client.calculateRetryDelay(attempt);
+        const timeout_ms = client.calculateRetryDelay(attempt);
 
         const received_bytes = receiveWithTimeout(
             socket,
@@ -96,34 +95,64 @@ fn queryWithAddress(server_address: net.Address) !core_types.IpAddress {
         };
 
         if (received_bytes == 0) {
-            continue;
+            if (attempt < MAX_RETRIES - 1) {
+                continue;
+            }
+            return error.NoResponse;
         }
 
-        const public_address = try client.extractPublicAddress(
+        const public_address = client.extractPublicAddress(
             response_buffer[0..received_bytes],
             transaction_id,
-        );
+        ) catch |err| {
+            // Only retry on transaction ID mismatch (might be stale response)
+            // Don't retry on parsing errors or invalid message types
+            if (err == core_types.StunError.TransactionIdMismatch and attempt < MAX_RETRIES - 1) {
+                log.debug("Transaction ID mismatch, retrying...", .{});
+                continue;
+            }
+            return err;
+        };
 
         if (public_address) |addr| {
             return addr;
         }
+
+        // No XOR-MAPPED-ADDRESS attribute found, retry
+        if (attempt < MAX_RETRIES - 1) {
+            log.debug("No XOR-MAPPED-ADDRESS attribute found, retrying...", .{});
+            continue;
+        }
+        return error.NoAddressAttribute;
     }
 
     log.err("Max retries exceeded", .{});
     return error.MaxRetriesExceeded;
 }
 
-fn formatAddress(address: net.Address, buffer: []u8) []const u8 {
-    const ipv4 = address.in;
-    const addr_bytes = std.mem.toBytes(ipv4.sa.addr);
-    const port = std.mem.bigToNative(u16, ipv4.sa.port);
-    return std.fmt.bufPrint(buffer, "{}.{}.{}.{}:{}", .{
-        addr_bytes[0],
-        addr_bytes[1],
-        addr_bytes[2],
-        addr_bytes[3],
-        port,
-    }) catch "invalid";
+fn extractIpAddress(address: net.Address) core_types.IpAddress {
+    switch (address.any.family) {
+        posix.AF.INET => {
+            const ipv4 = address.in;
+            const addr_bytes = std.mem.toBytes(ipv4.sa.addr);
+            return core_types.IpAddress{
+                .ipv4 = .{
+                    .addr = addr_bytes,
+                    .port = std.mem.bigToNative(u16, ipv4.sa.port),
+                },
+            };
+        },
+        posix.AF.INET6 => {
+            const ipv6 = address.in6;
+            return core_types.IpAddress{
+                .ipv6 = .{
+                    .addr = ipv6.sa.addr,
+                    .port = std.mem.bigToNative(u16, ipv6.sa.port),
+                },
+            };
+        },
+        else => unreachable,
+    }
 }
 
 fn receiveWithTimeout(
@@ -180,27 +209,5 @@ pub fn main() !void {
         return err;
     };
 
-    // Format the public address nicely
-    var addr_buf: [64]u8 = undefined;
-    const addr_str = switch (public_address) {
-        .ipv4 => |ipv4| std.fmt.bufPrint(&addr_buf, "{}.{}.{}.{}:{}", .{
-            ipv4.addr[0],
-            ipv4.addr[1],
-            ipv4.addr[2],
-            ipv4.addr[3],
-            ipv4.port,
-        }) catch "invalid",
-        .ipv6 => |ipv6| std.fmt.bufPrint(&addr_buf, "[{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}]:{}", .{
-            ipv6.addr[0],  ipv6.addr[1],
-            ipv6.addr[2],  ipv6.addr[3],
-            ipv6.addr[4],  ipv6.addr[5],
-            ipv6.addr[6],  ipv6.addr[7],
-            ipv6.addr[8],  ipv6.addr[9],
-            ipv6.addr[10], ipv6.addr[11],
-            ipv6.addr[12], ipv6.addr[13],
-            ipv6.addr[14], ipv6.addr[15],
-            ipv6.port,
-        }) catch "invalid",
-    };
-    log.info("Public address: {s}", .{addr_str});
+    log.info("Public address: {any}", .{public_address});
 }

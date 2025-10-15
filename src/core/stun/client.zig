@@ -24,7 +24,7 @@ pub fn extractPublicAddress(
     }
 
     if (!std.mem.eql(u8, &header.transaction_id, &expected_transaction_id)) {
-        return types.StunError.InvalidMessageType; // Transaction ID mismatch
+        return types.StunError.TransactionIdMismatch;
     }
 
     return try message.parseXorMappedAddress(response_data, expected_transaction_id);
