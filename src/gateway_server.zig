@@ -1,6 +1,8 @@
 const std = @import("std");
 const gateway_core = @import("core/gateway/server.zig");
 const kv = @import("core/kv/store.zig");
+const auth_mod = @import("core/kv/auth.zig");
+const crypto_mod = @import("core/kv/crypto.zig");
 
 const log = std.log.scoped(.gateway_server);
 
@@ -20,6 +22,9 @@ pub const Server = struct {
         log.info("Loading KV store from: {s}", .{config.kv_path});
         var kv_store = try loadKVStore(allocator, config.kv_path);
         errdefer kv_store.deinit(allocator);
+
+        // Bootstrap admin user on first run
+        try bootstrapAdminUser(allocator, &kv_store);
 
         return Server{
             .config = config,
@@ -61,6 +66,8 @@ fn saveKVStore(allocator: std.mem.Allocator, store: *kv.KVStore, dir_path: []con
     defer file.close();
 
     try file.writeAll(snapshot);
+
+    try saveMasterKey(allocator, store, dir_path);
 }
 
 fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
@@ -68,6 +75,15 @@ fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
     errdefer store.deinit(allocator);
 
     try store.bootstrap("localhost:0");
+
+    // Load master key if it exists, otherwise generate one
+    if (try loadMasterKey(allocator, dir_path)) |master_key| {
+        store.setMasterKey(master_key);
+    } else {
+        try store.generateAndSetMasterKey();
+        try saveMasterKey(allocator, &store, dir_path);
+        log.info("Generated new master encryption key", .{});
+    }
 
     const state_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "state.dat" });
     defer allocator.free(state_path);
@@ -88,4 +104,86 @@ fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
     log.info("KV store restored from snapshot", .{});
 
     return store;
+}
+
+fn loadMasterKey(allocator: std.mem.Allocator, dir_path: []const u8) !?crypto_mod.EncryptionKey {
+    // Check environment variable first
+    if (std.process.getEnvVarOwned(allocator, "HT_KV_MASTER_KEY")) |key_str| {
+        defer allocator.free(key_str);
+        return try crypto_mod.EncryptionKey.fromString(key_str);
+    } else |_| {}
+
+    // Try to load from file
+    const key_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "master.key" });
+    defer allocator.free(key_path);
+
+    const file = std.fs.cwd().openFile(key_path, .{}) catch |err| {
+        if (err == error.FileNotFound) {
+            return null;
+        }
+        return err;
+    };
+    defer file.close();
+
+    const key_str = try file.readToEndAlloc(allocator, 1024);
+    defer allocator.free(key_str);
+
+    return try crypto_mod.EncryptionKey.fromString(key_str);
+}
+
+fn saveMasterKey(allocator: std.mem.Allocator, store: *kv.KVStore, dir_path: []const u8) !void {
+    const master_key = store.master_key orelse return;
+
+    const key_str = try master_key.toString(allocator);
+    defer allocator.free(key_str);
+
+    const key_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "master.key" });
+    defer allocator.free(key_path);
+
+    const file = try std.fs.cwd().createFile(key_path, .{ .mode = 0o600 });
+    defer file.close();
+
+    try file.writeAll(key_str);
+}
+
+fn generateRandomPassword(allocator: std.mem.Allocator) ![]const u8 {
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+    var password = try allocator.alloc(u8, 24);
+    errdefer allocator.free(password);
+
+    var random_bytes: [24]u8 = undefined;
+    std.crypto.random.bytes(&random_bytes);
+
+    for (random_bytes, 0..) |byte, i| {
+        password[i] = charset[@as(usize, byte) % charset.len];
+    }
+
+    return password;
+}
+
+fn bootstrapAdminUser(allocator: std.mem.Allocator, store: *kv.KVStore) !void {
+    // Check if admin user already exists
+    const admin_exists = blk: {
+        _ = auth_mod.getUser(store, allocator, "admin") catch |err| {
+            if (err == auth_mod.AuthError.UserNotFound) {
+                break :blk false;
+            }
+            return err;
+        };
+        break :blk true;
+    };
+
+    if (admin_exists) {
+        return;
+    }
+
+    // Generate random password
+    const password = try generateRandomPassword(allocator);
+    defer allocator.free(password);
+
+    // Create admin user
+    try auth_mod.createUser(store, allocator, "admin", password, "{}");
+
+    // Print password to console (only on first run)
+    log.warn("Admin user created - username: admin, password: {s}", .{password});
 }
