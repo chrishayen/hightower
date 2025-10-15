@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const registration_handler = @import("registration_handler.zig");
+const auth_handler = @import("auth_handler.zig");
 const kv_store_mod = @import("../kv_store.zig");
 
 pub const ServerConfig = struct {
@@ -30,6 +31,7 @@ pub const Server = struct {
         var router = try http_server.router(.{});
         router.get("/", helloHandler, .{});
         router.post("/api/register", registerHandler, .{});
+        router.post("/api/auth", authHandler, .{});
 
         std.log.info("Gateway server listening on {s}:{d}", .{ self.config.address, self.config.port });
 
@@ -57,6 +59,31 @@ fn registerHandler(self: *Server, req: *httpz.Request, res: *httpz.Response) !vo
         std.log.err("Registration error: {}", .{err});
         res.status = 400;
         res.body = "{\"success\":false,\"message\":\"Invalid request\"}";
+        return;
+    };
+
+    const json = try response.toJson(req.arena);
+
+    res.status = 200;
+    res.header("Content-Type", "application/json");
+    res.body = json;
+}
+
+fn authHandler(self: *Server, req: *httpz.Request, res: *httpz.Response) !void {
+    const body = req.body() orelse {
+        res.status = 400;
+        res.body = "{\"success\":false,\"message\":\"Missing request body\"}";
+        return;
+    };
+
+    const response = auth_handler.handleAuth(
+        self.kv_store,
+        req.arena,
+        body,
+    ) catch |err| {
+        std.log.err("Auth error: {}", .{err});
+        res.status = 401;
+        res.body = "{\"success\":false,\"message\":\"Authentication failed\"}";
         return;
     };
 
