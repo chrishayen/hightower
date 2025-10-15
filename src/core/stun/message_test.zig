@@ -317,3 +317,29 @@ test "parseXorMappedAddress - wrong message type" {
 
     try testing.expectError(types.StunError.InvalidMessageType, message.parseXorMappedAddress(&data, transaction_id));
 }
+
+test "xorAddress - ipv4 with known values" {
+    // Test with a known IP to verify correct endianness of magic cookie
+    // Real IP: 71.179.184.7
+    // Magic cookie: 0x2112A442 (big-endian: [0x21, 0x12, 0xA4, 0x42])
+    // XOR result should be:
+    //   71 ^ 0x21 = 0x47 ^ 0x21 = 0x66
+    //   179 ^ 0x12 = 0xB3 ^ 0x12 = 0xA1
+    //   184 ^ 0xA4 = 0xB8 ^ 0xA4 = 0x1C
+    //   7 ^ 0x42 = 0x07 ^ 0x42 = 0x45
+    // XOR'd IP should be: 102.161.28.69
+
+    const addr = types.IpAddress{
+        .ipv4 = .{
+            .addr = .{ 71, 179, 184, 7 },
+            .port = 12345,
+        },
+    };
+    const transaction_id = [_]u8{0} ** 12;
+
+    const xor_addr = message.xorAddress(addr, transaction_id);
+    try testing.expect(xor_addr == .ipv4);
+
+    // Verify the XOR result matches expected values
+    try testing.expectEqualSlices(u8, &[_]u8{ 102, 161, 28, 69 }, &xor_addr.ipv4.addr);
+}

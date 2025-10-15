@@ -109,7 +109,8 @@ pub fn encodeAddress(address: types.IpAddress, buffer: []u8) !usize {
 pub fn xorAddress(address: types.IpAddress, transaction_id: [12]u8) types.IpAddress {
     switch (address) {
         .ipv4 => |ipv4| {
-            const magic_bytes = std.mem.toBytes(types.MAGIC_COOKIE);
+            // Magic cookie must be in big-endian byte order for XOR
+            const magic_bytes: [4]u8 = @bitCast(std.mem.nativeToBig(u32, types.MAGIC_COOKIE));
             var xor_addr: [4]u8 = undefined;
             for (0..4) |i| {
                 xor_addr[i] = ipv4.addr[i] ^ magic_bytes[i];
@@ -118,7 +119,8 @@ pub fn xorAddress(address: types.IpAddress, transaction_id: [12]u8) types.IpAddr
             return types.IpAddress{ .ipv4 = .{ .addr = xor_addr, .port = xor_port } };
         },
         .ipv6 => |ipv6| {
-            const magic_bytes = std.mem.toBytes(types.MAGIC_COOKIE);
+            // Magic cookie must be in big-endian byte order for XOR
+            const magic_bytes: [4]u8 = @bitCast(std.mem.nativeToBig(u32, types.MAGIC_COOKIE));
             var xor_key: [16]u8 = undefined;
             @memcpy(xor_key[0..4], &magic_bytes);
             @memcpy(xor_key[4..16], &transaction_id);

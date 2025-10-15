@@ -137,3 +137,30 @@ test "isValidBindingRequest - wrong message type" {
 
     try testing.expect(!server.isValidBindingRequest(&request));
 }
+
+test "processBindingRequest - verify correct endianness for XOR" {
+    // Test that the server correctly XORs addresses with big-endian magic cookie
+    const transaction_id = [_]u8{0} ** 12;
+
+    // Create a binding request
+    var request: [types.MessageHeader.SIZE]u8 = undefined;
+    _ = try message.encodeRequest(transaction_id, &request);
+
+    // Use a known IP address to verify correct XOR operation
+    const client_addr = types.IpAddress{
+        .ipv4 = .{
+            .addr = .{ 71, 179, 184, 7 },
+            .port = 12345,
+        },
+    };
+
+    // Process the request
+    var response: [256]u8 = undefined;
+    const response_size = try server.processBindingRequest(&request, client_addr, &response);
+
+    // Parse the response and verify we get the original address back
+    const parsed_addr = try message.parseXorMappedAddress(response[0..response_size], transaction_id);
+    try testing.expect(parsed_addr != null);
+    try testing.expectEqual(client_addr.ipv4.port, parsed_addr.?.ipv4.port);
+    try testing.expectEqualSlices(u8, &client_addr.ipv4.addr, &parsed_addr.?.ipv4.addr);
+}
