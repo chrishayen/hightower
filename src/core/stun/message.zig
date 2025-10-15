@@ -1,7 +1,14 @@
+//! STUN message encoding and decoding operations.
+//!
+//! Provides functions to parse and encode STUN messages, including headers,
+//! attributes, and address encoding with XOR obfuscation per RFC 5389.
+
 const std = @import("std");
 const types = @import("types.zig");
 
-/// Parse a STUN message header from bytes
+/// Parse STUN message header from raw bytes
+///
+/// Validates magic cookie and message type. Returns error if invalid.
 pub fn parseHeader(data: []const u8) !types.MessageHeader {
     if (data.len < types.MessageHeader.SIZE) {
         return types.StunError.MessageTooShort;
@@ -35,7 +42,9 @@ pub fn parseHeader(data: []const u8) !types.MessageHeader {
     };
 }
 
-/// Encode a STUN message header to bytes
+/// Encode STUN message header to raw bytes
+///
+/// Writes header in network byte order (big-endian).
 pub fn encodeHeader(header: types.MessageHeader, buffer: []u8) !void {
     if (buffer.len < types.MessageHeader.SIZE) {
         return types.StunError.BufferTooSmall;
@@ -47,7 +56,9 @@ pub fn encodeHeader(header: types.MessageHeader, buffer: []u8) !void {
     @memcpy(buffer[8..20], &header.transaction_id);
 }
 
-/// Parse an IP address from STUN address attribute format
+/// Parse IP address from STUN address attribute format
+///
+/// Handles both IPv4 (8 bytes) and IPv6 (20 bytes) addresses.
 pub fn parseAddress(data: []const u8) !types.IpAddress {
     if (data.len < 4) {
         return types.StunError.AttributeTooShort;
@@ -79,7 +90,9 @@ pub fn parseAddress(data: []const u8) !types.IpAddress {
     }
 }
 
-/// Encode an IP address to STUN address attribute format
+/// Encode IP address to STUN address attribute format
+///
+/// Returns number of bytes written (8 for IPv4, 20 for IPv6).
 pub fn encodeAddress(address: types.IpAddress, buffer: []u8) !usize {
     switch (address) {
         .ipv4 => |ipv4| {
@@ -105,7 +118,10 @@ pub fn encodeAddress(address: types.IpAddress, buffer: []u8) !usize {
     }
 }
 
-/// XOR an IP address with the magic cookie and transaction ID
+/// XOR IP address with magic cookie and transaction ID
+///
+/// Used for XOR-MAPPED-ADDRESS attribute encoding/decoding.
+/// XOR is reversible - applying it twice returns the original address.
 pub fn xorAddress(address: types.IpAddress, transaction_id: [12]u8) types.IpAddress {
     switch (address) {
         .ipv4 => |ipv4| {
@@ -135,7 +151,9 @@ pub fn xorAddress(address: types.IpAddress, transaction_id: [12]u8) types.IpAddr
     }
 }
 
-/// Parse a STUN binding request (validates header)
+/// Parse and validate STUN binding request
+///
+/// Returns header if valid binding request, error otherwise.
 pub fn parseRequest(data: []const u8) !types.MessageHeader {
     const header = try parseHeader(data);
 
@@ -146,7 +164,11 @@ pub fn parseRequest(data: []const u8) !types.MessageHeader {
     return header;
 }
 
-/// Encode a STUN binding response with XOR-MAPPED-ADDRESS attribute
+/// Encode STUN binding response with XOR-MAPPED-ADDRESS attribute
+///
+/// Creates a response message containing the client's observed address
+/// XOR'd with the magic cookie and transaction ID.
+/// Returns total bytes written to buffer.
 pub fn encodeResponse(
     transaction_id: [12]u8,
     client_address: types.IpAddress,
@@ -188,14 +210,19 @@ pub fn encodeResponse(
     return total_size;
 }
 
-/// Generate a random transaction ID
+/// Generate random 12-byte transaction ID
+///
+/// Used to match requests with responses.
 pub fn generateTransactionId(random: std.Random) [12]u8 {
     var transaction_id: [12]u8 = undefined;
     random.bytes(&transaction_id);
     return transaction_id;
 }
 
-/// Encode a STUN binding request
+/// Encode STUN binding request
+///
+/// Creates a basic binding request with no attributes.
+/// Returns bytes written (always 20 for header-only request).
 pub fn encodeRequest(transaction_id: [12]u8, buffer: []u8) !usize {
     if (buffer.len < types.MessageHeader.SIZE) {
         return types.StunError.BufferTooSmall;
@@ -212,7 +239,10 @@ pub fn encodeRequest(transaction_id: [12]u8, buffer: []u8) !usize {
     return types.MessageHeader.SIZE;
 }
 
-/// Parse XOR-MAPPED-ADDRESS from a response
+/// Parse XOR-MAPPED-ADDRESS from binding response
+///
+/// Searches response attributes for XOR-MAPPED-ADDRESS and decodes it.
+/// Returns the de-XOR'd address or null if attribute not found.
 pub fn parseXorMappedAddress(data: []const u8, transaction_id: [12]u8) !?types.IpAddress {
     if (data.len < types.MessageHeader.SIZE) {
         return types.StunError.MessageTooShort;

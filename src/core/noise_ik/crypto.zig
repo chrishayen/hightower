@@ -1,3 +1,8 @@
+//! Cryptographic primitives for Noise_IK protocol.
+//!
+//! Provides key generation, Diffie-Hellman operations, HKDF key derivation,
+//! and authenticated encryption using X25519, HMAC-SHA256, and ChaCha20-Poly1305.
+
 const std = @import("std");
 const crypto = std.crypto;
 const mem = std.mem;
@@ -10,6 +15,7 @@ const StaticKey = types.StaticKey;
 const EphemeralKey = types.EphemeralKey;
 const CipherState = types.CipherState;
 
+/// Generate a new X25519 static keypair for long-term identity
 pub fn generateKeyPair() !StaticKey {
     var seed: [32]u8 = undefined;
     crypto.random.bytes(&seed);
@@ -22,6 +28,7 @@ pub fn generateKeyPair() !StaticKey {
     };
 }
 
+/// Generate a new X25519 ephemeral keypair for a single handshake
 pub fn generateEphemeralKey() !EphemeralKey {
     var seed: [32]u8 = undefined;
     crypto.random.bytes(&seed);
@@ -34,10 +41,15 @@ pub fn generateEphemeralKey() !EphemeralKey {
     };
 }
 
+/// Perform X25519 Diffie-Hellman key agreement
 pub fn dh(private_key: [key_len]u8, public_key: [key_len]u8) ![key_len]u8 {
     return try crypto.dh.X25519.scalarmult(private_key, public_key);
 }
 
+/// HKDF with two output keys using HMAC-SHA256
+///
+/// Derives two 32-byte keys from input key material using the chaining key as salt.
+/// Implements the standard HKDF pattern used in Noise Protocol Framework.
 pub fn hkdf2(
     chaining_key: *const [hash_len]u8,
     input_key_material: []const u8,
@@ -59,6 +71,10 @@ pub fn hkdf2(
     hmac2.final(output2);
 }
 
+/// Encrypt plaintext with ChaCha20-Poly1305 AEAD using additional authenticated data
+///
+/// Returns the total length of ciphertext + tag written to output buffer.
+/// Output buffer must be at least plaintext.len + mac_len bytes.
 pub fn encryptWithAd(
     cipher: *const CipherState,
     ad: []const u8,
@@ -92,6 +108,10 @@ pub fn encryptWithAd(
     return plaintext.len + mac_len;
 }
 
+/// Decrypt ciphertext with ChaCha20-Poly1305 AEAD using additional authenticated data
+///
+/// Returns the length of plaintext written to output buffer.
+/// Fails if authentication tag verification fails.
 pub fn decryptWithAd(
     cipher: *const CipherState,
     ad: []const u8,

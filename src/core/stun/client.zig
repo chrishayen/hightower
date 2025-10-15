@@ -1,9 +1,16 @@
+//! STUN client operations for NAT traversal and public address discovery.
+//!
+//! Provides functions to create binding requests, extract public addresses
+//! from responses, and handle retry logic with exponential backoff.
+
 const std = @import("std");
 const types = @import("types.zig");
 const message = @import("message.zig");
 
-/// Create a STUN binding request
-/// Returns the size of the request written to the buffer
+/// Create STUN binding request message
+///
+/// Returns the size of the request written to the buffer.
+/// Buffer must be at least 20 bytes for the header.
 pub fn createBindingRequest(
     transaction_id: [12]u8,
     buffer: []u8,
@@ -11,8 +18,10 @@ pub fn createBindingRequest(
     return try message.encodeRequest(transaction_id, buffer);
 }
 
-/// Validate a STUN binding response and extract the public address
-/// Returns the extracted IP address or null if not found
+/// Validate STUN binding response and extract public address
+///
+/// Verifies transaction ID matches and extracts XOR-MAPPED-ADDRESS.
+/// Returns the public IP address or null if XOR-MAPPED-ADDRESS not present.
 pub fn extractPublicAddress(
     response_data: []const u8,
     expected_transaction_id: [12]u8,
@@ -30,7 +39,9 @@ pub fn extractPublicAddress(
     return try message.parseXorMappedAddress(response_data, expected_transaction_id);
 }
 
-/// Validate that incoming data is a valid STUN binding response
+/// Check if data is a valid STUN binding response
+///
+/// Quick validation without transaction ID checking.
 pub fn isValidBindingResponse(data: []const u8) bool {
     if (data.len < types.MessageHeader.SIZE) {
         return false;
@@ -41,8 +52,9 @@ pub fn isValidBindingResponse(data: []const u8) bool {
 }
 
 /// Calculate retry delay using exponential backoff
-/// attempt: 0-based retry attempt number
-/// Returns delay in milliseconds
+///
+/// Implements exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms (max).
+/// Returns delay in milliseconds for the given 0-based attempt number.
 pub fn calculateRetryDelay(attempt: u32) u64 {
     const base_delay_ms: u64 = 100;
     const max_delay_ms: u64 = 3200;

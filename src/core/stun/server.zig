@@ -1,9 +1,17 @@
+//! STUN server operations for handling binding requests.
+//!
+//! Provides functions to process incoming STUN binding requests and
+//! generate responses containing the client's observed address.
+
 const std = @import("std");
 const types = @import("types.zig");
 const message = @import("message.zig");
 
-/// Process a STUN binding request and generate a response
-/// Returns the size of the response written to the buffer
+/// Process STUN binding request and generate response
+///
+/// Extracts transaction ID from request and creates response with
+/// client's observed address in XOR-MAPPED-ADDRESS attribute.
+/// Returns the size of the response written to the buffer.
 pub fn processBindingRequest(
     request_data: []const u8,
     client_address: types.IpAddress,
@@ -13,7 +21,9 @@ pub fn processBindingRequest(
     return try message.encodeResponse(header.transaction_id, client_address, response_buffer);
 }
 
-/// Validate that incoming data is a valid STUN binding request
+/// Check if data is a valid STUN binding request
+///
+/// Quick validation to filter non-STUN traffic.
 pub fn isValidBindingRequest(data: []const u8) bool {
     if (data.len < types.MessageHeader.SIZE) {
         return false;

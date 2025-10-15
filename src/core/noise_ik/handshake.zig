@@ -1,3 +1,12 @@
+//! Noise_IK handshake message protocol implementation.
+//!
+//! Implements the two-message Noise_IK handshake pattern:
+//! - Message A (initiator -> responder): e, es, s, ss
+//! - Message B (responder -> initiator): e, ee, se
+//!
+//! After both messages are exchanged, both parties derive matching
+//! transport cipher states for secure bidirectional communication.
+
 const std = @import("std");
 const types = @import("types.zig");
 const crypto_ops = @import("crypto.zig");
@@ -7,6 +16,16 @@ const key_len = types.key_len;
 const mac_len = types.mac_len;
 const HandshakeState = types.HandshakeState;
 
+/// Write first handshake message (initiator -> responder)
+///
+/// Message format: e, es, s, ss, payload
+/// - e: ephemeral public key
+/// - es: DH(e, remote_s)
+/// - s: encrypted static public key
+/// - ss: DH(s, remote_s)
+/// - payload: encrypted payload data
+///
+/// Returns total bytes written to output buffer.
 pub fn writeMessageA(
     state: *HandshakeState,
     payload: []const u8,
@@ -44,6 +63,11 @@ pub fn writeMessageA(
     return offset;
 }
 
+/// Read first handshake message (responder <- initiator)
+///
+/// Message format: e, es, s, ss, payload
+/// Processes ephemeral key, performs DH operations, decrypts static key
+/// and payload. Returns decrypted payload length.
 pub fn readMessageA(
     state: *HandshakeState,
     message: []const u8,
@@ -91,6 +115,15 @@ pub fn readMessageA(
     return payload_len;
 }
 
+/// Write second handshake message (responder -> initiator)
+///
+/// Message format: e, ee, se, payload
+/// - e: ephemeral public key
+/// - ee: DH(e, remote_e)
+/// - se: DH(s, remote_e)
+/// - payload: encrypted payload data
+///
+/// Returns total bytes written to output buffer.
 pub fn writeMessageB(
     state: *HandshakeState,
     payload: []const u8,
@@ -125,6 +158,11 @@ pub fn writeMessageB(
     return offset;
 }
 
+/// Read second handshake message (initiator <- responder)
+///
+/// Message format: e, ee, se, payload
+/// Processes ephemeral key, performs DH operations, decrypts payload.
+/// Returns decrypted payload length.
 pub fn readMessageB(
     state: *HandshakeState,
     message: []const u8,
