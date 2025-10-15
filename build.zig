@@ -135,12 +135,91 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    // STUN module tests
+    const stun_types_module = b.createModule(.{
+        .root_source_file = b.path("src/core/stun/types_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const stun_types_tests = b.addTest(.{
+        .root_module = stun_types_module,
+    });
+    const run_stun_types_tests = b.addRunArtifact(stun_types_tests);
+
+    const stun_message_module = b.createModule(.{
+        .root_source_file = b.path("src/core/stun/message_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const stun_message_tests = b.addTest(.{
+        .root_module = stun_message_module,
+    });
+    const run_stun_message_tests = b.addRunArtifact(stun_message_tests);
+
+    const stun_server_module = b.createModule(.{
+        .root_source_file = b.path("src/core/stun/server_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const stun_server_tests = b.addTest(.{
+        .root_module = stun_server_module,
+    });
+    const run_stun_server_tests = b.addRunArtifact(stun_server_tests);
+
+    const stun_client_module = b.createModule(.{
+        .root_source_file = b.path("src/core/stun/client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const stun_client_tests = b.addTest(.{
+        .root_module = stun_client_module,
+    });
+    const run_stun_client_tests = b.addRunArtifact(stun_client_tests);
+
+    // STUN server executable
+    const stun_server_exe = b.addExecutable(.{
+        .name = "stun_server",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/stun_server.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(stun_server_exe);
+
+    const run_stun_server = b.addRunArtifact(stun_server_exe);
+    const run_stun_server_step = b.step("stun-server", "Run the STUN server");
+    run_stun_server_step.dependOn(&run_stun_server.step);
+
+    // STUN client executable
+    const stun_client_exe = b.addExecutable(.{
+        .name = "stun_client",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/stun_client.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(stun_client_exe);
+
+    const run_stun_client = b.addRunArtifact(stun_client_exe);
+    const run_stun_client_step = b.step("stun-client", "Run the STUN client");
+    run_stun_client_step.dependOn(&run_stun_client.step);
+
+    if (b.args) |args| {
+        run_stun_client.addArgs(args);
+    }
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_stun_types_tests.step);
+    test_step.dependOn(&run_stun_message_tests.step);
+    test_step.dependOn(&run_stun_server_tests.step);
+    test_step.dependOn(&run_stun_client_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
