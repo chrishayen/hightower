@@ -4,6 +4,8 @@ const posix = std.posix;
 
 const stun_server = @import("stun_server.zig");
 const stun_client = @import("stun_client.zig");
+const kv = @import("core/kv/store.zig");
+const kv_shell = @import("kv_shell.zig");
 
 const log = std.log.scoped(.cli);
 
@@ -11,10 +13,16 @@ const Command = enum {
     help,
     run,
     stun,
+    kv,
 };
 
 const RunSubcommand = enum {
     stun,
+};
+
+const KVSubcommand = enum {
+    init,
+    connect,
 };
 
 fn printHelp() void {
@@ -22,17 +30,21 @@ fn printHelp() void {
         \\ht - WireGuard implementation CLI
         \\
         \\Usage:
-        \\  ht run <service>     Start a service
+        \\  ht run <service>          Start a service
         \\  ht stun <address> [port]  Query a STUN server
-        \\  ht help              Show this help message
+        \\  ht kv init <path>         Create a new KV store at path
+        \\  ht kv connect <path>      Connect to KV store and start interactive session
+        \\  ht help                   Show this help message
         \\
         \\Services:
-        \\  stun                 Start the STUN server
+        \\  stun                      Start the STUN server
         \\
         \\Examples:
         \\  ht run stun
         \\  ht stun stun.l.google.com 19302
         \\  ht stun stun.l.google.com
+        \\  ht kv init ./mystore
+        \\  ht kv connect ./mystore
         \\
     , .{});
 }
@@ -40,12 +52,19 @@ fn printHelp() void {
 fn parseCommand(arg: []const u8) ?Command {
     if (std.mem.eql(u8, arg, "run")) return .run;
     if (std.mem.eql(u8, arg, "stun")) return .stun;
+    if (std.mem.eql(u8, arg, "kv")) return .kv;
     if (std.mem.eql(u8, arg, "help")) return .help;
     return null;
 }
 
 fn parseRunSubcommand(arg: []const u8) ?RunSubcommand {
     if (std.mem.eql(u8, arg, "stun")) return .stun;
+    return null;
+}
+
+fn parseKVSubcommand(arg: []const u8) ?KVSubcommand {
+    if (std.mem.eql(u8, arg, "init")) return .init;
+    if (std.mem.eql(u8, arg, "connect")) return .connect;
     return null;
 }
 
@@ -108,6 +127,94 @@ fn handleStunCommand(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     try queryStunServer(allocator, server_host, server_port);
 }
 
+fn saveKVStore(allocator: std.mem.Allocator, store: *kv.KVStore, dir_path: []const u8) !void {
+    const snapshot = try store.kv_state.takeSnapshot(allocator);
+    defer allocator.free(snapshot);
+
+    const state_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "state.dat" });
+    defer allocator.free(state_path);
+
+    const file = try std.fs.cwd().createFile(state_path, .{});
+    defer file.close();
+
+    try file.writeAll(snapshot);
+}
+
+fn loadKVStore(allocator: std.mem.Allocator, dir_path: []const u8) !kv.KVStore {
+    var store = try kv.KVStore.init(allocator, 1);
+    errdefer store.deinit(allocator);
+
+    try store.bootstrap("localhost:0");
+
+    const state_path = try std.fs.path.join(allocator, &[_][]const u8{ dir_path, "state.dat" });
+    defer allocator.free(state_path);
+
+    const file = std.fs.cwd().openFile(state_path, .{}) catch |err| {
+        if (err == error.FileNotFound) {
+            return store;
+        }
+        return err;
+    };
+    defer file.close();
+
+    const snapshot = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+    defer allocator.free(snapshot);
+
+    try store.kv_state.restoreSnapshot(snapshot);
+
+    return store;
+}
+
+fn kvInit(allocator: std.mem.Allocator, path: []const u8) !void {
+    std.fs.cwd().makeDir(path) catch |err| {
+        if (err == error.PathAlreadyExists) {
+            std.debug.print("Error: Directory '{s}' already exists\n", .{path});
+            return error.PathAlreadyExists;
+        }
+        return err;
+    };
+
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+
+    try store.bootstrap("localhost:0");
+
+    try saveKVStore(allocator, &store, path);
+
+    std.debug.print("KV store initialized at '{s}'\n", .{path});
+}
+
+fn kvConnect(allocator: std.mem.Allocator, path: []const u8) !void {
+    try kv_shell.run(allocator, path);
+}
+
+fn handleKvCommand(allocator: std.mem.Allocator, args: [][:0]u8) !void {
+    if (args.len < 3) {
+        std.debug.print("Error: 'kv' command requires a subcommand\n\n", .{});
+        printHelp();
+        return error.MissingSubcommand;
+    }
+
+    const subcommand = parseKVSubcommand(args[2]) orelse {
+        std.debug.print("Error: Unknown kv subcommand '{s}'\n\n", .{args[2]});
+        printHelp();
+        return error.UnknownSubcommand;
+    };
+
+    if (args.len < 4) {
+        std.debug.print("Error: 'kv {s}' requires a path\n\n", .{args[2]});
+        printHelp();
+        return error.MissingPath;
+    }
+
+    const path = args[3];
+
+    switch (subcommand) {
+        .init => try kvInit(allocator, path),
+        .connect => try kvConnect(allocator, path),
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -131,12 +238,14 @@ pub fn main() !void {
         .help => printHelp(),
         .run => try handleRunCommand(allocator, args),
         .stun => try handleStunCommand(allocator, args[1..]),
+        .kv => try handleKvCommand(allocator, args),
     }
 }
 
 test "parseCommand" {
     try std.testing.expectEqual(Command.run, parseCommand("run"));
     try std.testing.expectEqual(Command.stun, parseCommand("stun"));
+    try std.testing.expectEqual(Command.kv, parseCommand("kv"));
     try std.testing.expectEqual(Command.help, parseCommand("help"));
     try std.testing.expectEqual(@as(?Command, null), parseCommand("unknown"));
 }
@@ -144,4 +253,10 @@ test "parseCommand" {
 test "parseRunSubcommand" {
     try std.testing.expectEqual(RunSubcommand.stun, parseRunSubcommand("stun"));
     try std.testing.expectEqual(@as(?RunSubcommand, null), parseRunSubcommand("unknown"));
+}
+
+test "parseKVSubcommand" {
+    try std.testing.expectEqual(KVSubcommand.init, parseKVSubcommand("init"));
+    try std.testing.expectEqual(KVSubcommand.connect, parseKVSubcommand("connect"));
+    try std.testing.expectEqual(@as(?KVSubcommand, null), parseKVSubcommand("unknown"));
 }

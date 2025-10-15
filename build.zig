@@ -57,6 +57,13 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
+
+    // Raft module for use by other modules
+    const raft_core_module = b.addModule("raft", .{
+        .root_source_file = b.path("src/core/raft.zig"),
+        .target = target,
+    });
+
     const exe = b.addExecutable(.{
         .name = "ht",
         .root_module = b.createModule(.{
@@ -79,6 +86,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "ht", .module = mod },
+                .{ .name = "raft", .module = raft_core_module },
             },
         }),
     });
@@ -176,6 +184,81 @@ pub fn build(b: *std.Build) void {
     });
     const run_stun_client_tests = b.addRunArtifact(stun_client_tests);
 
+    // Raft module tests
+    const raft_types_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/types_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_types_tests = b.addTest(.{
+        .root_module = raft_types_module,
+    });
+    const run_raft_types_tests = b.addRunArtifact(raft_types_tests);
+
+    const raft_config_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/config_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_config_tests = b.addTest(.{
+        .root_module = raft_config_module,
+    });
+    const run_raft_config_tests = b.addRunArtifact(raft_config_tests);
+
+    const raft_state_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/state_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_state_tests = b.addTest(.{
+        .root_module = raft_state_module,
+    });
+    const run_raft_state_tests = b.addRunArtifact(raft_state_tests);
+
+    const raft_rpc_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/rpc_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_rpc_tests = b.addTest(.{
+        .root_module = raft_rpc_module,
+    });
+    const run_raft_rpc_tests = b.addRunArtifact(raft_rpc_tests);
+
+    const raft_state_machine_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/state_machine_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_state_machine_tests = b.addTest(.{
+        .root_module = raft_state_machine_module,
+    });
+    const run_raft_state_machine_tests = b.addRunArtifact(raft_state_machine_tests);
+
+    const raft_node_module = b.createModule(.{
+        .root_source_file = b.path("src/core/raft/node_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raft_node_tests = b.addTest(.{
+        .root_module = raft_node_module,
+    });
+    const run_raft_node_tests = b.addRunArtifact(raft_node_tests);
+
+    // KV store tests - needs imports for raft modules
+    const kv_store_module = b.createModule(.{
+        .root_source_file = b.path("src/core/kv/store_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "raft", .module = raft_core_module },
+        },
+    });
+    const kv_store_tests = b.addTest(.{
+        .root_module = kv_store_module,
+    });
+    const run_kv_store_tests = b.addRunArtifact(kv_store_tests);
+
     // STUN server executable
     const stun_server_exe = b.addExecutable(.{
         .name = "stun_server",
@@ -220,6 +303,13 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_stun_message_tests.step);
     test_step.dependOn(&run_stun_server_tests.step);
     test_step.dependOn(&run_stun_client_tests.step);
+    test_step.dependOn(&run_raft_types_tests.step);
+    test_step.dependOn(&run_raft_config_tests.step);
+    test_step.dependOn(&run_raft_state_tests.step);
+    test_step.dependOn(&run_raft_rpc_tests.step);
+    test_step.dependOn(&run_raft_state_machine_tests.step);
+    test_step.dependOn(&run_raft_node_tests.step);
+    test_step.dependOn(&run_kv_store_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
