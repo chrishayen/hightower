@@ -110,9 +110,7 @@ pub const Server = struct {
             client_address.getOsSockLen(),
         );
 
-        var ip_buf: [64]u8 = undefined;
-        const client_ip_str = formatStunAddress(client_ip, &ip_buf);
-        log.debug("Responded to {s} with their public address: {s}", .{ client_addr_str, client_ip_str });
+        log.debug("Responded to {s} with their public address: {}", .{ client_addr_str, client_ip });
     }
 };
 
@@ -171,33 +169,6 @@ fn formatNetAddress(address: net.Address, buffer: []u8) []const u8 {
             }) catch "invalid";
         },
         else => return "unknown",
-    }
-}
-
-fn formatStunAddress(address: core_types.IpAddress, buffer: []u8) []const u8 {
-    switch (address) {
-        .ipv4 => |ipv4| {
-            return std.fmt.bufPrint(buffer, "{}.{}.{}.{}:{}", .{
-                ipv4.addr[0],
-                ipv4.addr[1],
-                ipv4.addr[2],
-                ipv4.addr[3],
-                ipv4.port,
-            }) catch "invalid";
-        },
-        .ipv6 => |ipv6| {
-            return std.fmt.bufPrint(buffer, "[{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}:{x:0>2}{x:0>2}]:{}", .{
-                ipv6.addr[0],  ipv6.addr[1],
-                ipv6.addr[2],  ipv6.addr[3],
-                ipv6.addr[4],  ipv6.addr[5],
-                ipv6.addr[6],  ipv6.addr[7],
-                ipv6.addr[8],  ipv6.addr[9],
-                ipv6.addr[10], ipv6.addr[11],
-                ipv6.addr[12], ipv6.addr[13],
-                ipv6.addr[14], ipv6.addr[15],
-                ipv6.port,
-            }) catch "invalid";
-        },
     }
 }
 
