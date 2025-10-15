@@ -245,9 +245,23 @@ pub fn build(b: *std.Build) void {
     });
     const run_raft_node_tests = b.addRunArtifact(raft_node_tests);
 
-    // KV store tests - needs imports for raft modules
-    const kv_store_module = b.createModule(.{
-        .root_source_file = b.path("src/core/kv/store_test.zig"),
+    // KV state machine tests (functional core)
+    const kv_state_machine_module = b.createModule(.{
+        .root_source_file = b.path("src/core/kv/state_machine_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "raft", .module = raft_core_module },
+        },
+    });
+    const kv_state_machine_tests = b.addTest(.{
+        .root_module = kv_state_machine_module,
+    });
+    const run_kv_state_machine_tests = b.addRunArtifact(kv_state_machine_tests);
+
+    // KV store tests (imperative shell) - uses main exe module which has all imports
+    const kv_store_test_module = b.createModule(.{
+        .root_source_file = b.path("src/kv_store_test.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -255,7 +269,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     const kv_store_tests = b.addTest(.{
-        .root_module = kv_store_module,
+        .root_module = kv_store_test_module,
     });
     const run_kv_store_tests = b.addRunArtifact(kv_store_tests);
 
@@ -309,6 +323,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_raft_rpc_tests.step);
     test_step.dependOn(&run_raft_state_machine_tests.step);
     test_step.dependOn(&run_raft_node_tests.step);
+    test_step.dependOn(&run_kv_state_machine_tests.step);
     test_step.dependOn(&run_kv_store_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.

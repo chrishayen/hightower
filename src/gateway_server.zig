@@ -1,7 +1,7 @@
 const std = @import("std");
-const gateway_core = @import("core/gateway/server.zig");
-const kv = @import("core/kv/store.zig");
-const auth_mod = @import("core/kv/auth.zig");
+const gateway_core = @import("gateway_core/server.zig");
+const kv = @import("kv_store.zig");
+const auth_mod = @import("auth_operations.zig");
 const crypto_mod = @import("core/kv/crypto.zig");
 
 const log = std.log.scoped(.gateway_server);

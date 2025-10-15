@@ -19,3 +19,5 @@ keys and connection details between peers.
 - Create subdirectories to group related files. For example, if you have multiple files for one feature (noise_ik), put them in their own folder (src/core/noise_ik/)
 - Use standard zig testing practices of a seperate test file per module
 - always run make test and make install after a change. make test returns nothing on success.
+- Functional core → src/core/ (pure functions, no I/O)
+- Imperative shell → src/ (I/O, network, file operations, side effects)

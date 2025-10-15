@@ -1,7 +1,7 @@
 const std = @import("std");
 const noise_ik = @import("../noise_ik/types.zig");
-
-// Pure registration validation logic (Functional Core)
+const kv = @import("../kv/store.zig");
+const auth_mod = @import("../kv/auth.zig");
 
 pub const RegistrationRequest = struct {
     public_ip: []const u8,
@@ -73,10 +73,29 @@ pub const RegistrationResponse = struct {
     }
 };
 
-// Pure function: Validate registration request and generate response
-pub fn validateRegistration(request: RegistrationRequest) RegistrationResponse {
-    // In the future, this could have more validation logic
-    // For now, we just log and return success
+pub fn handleRegistration(store: *kv.KVStore, allocator: std.mem.Allocator, body: []const u8) !RegistrationResponse {
+    var request = try RegistrationRequest.fromJson(allocator, body);
+    defer request.deinit(allocator);
+
+    if (requiresAuth(store)) {
+        if (request.auth_key) |provided_key| {
+            const username = auth_mod.verifyApiKey(store, allocator, provided_key) catch {
+                return RegistrationResponse{
+                    .success = false,
+                    .message = "Invalid auth key",
+                };
+            };
+            defer allocator.free(username);
+
+            std.log.info("Registration authenticated for user: {s}", .{username});
+        } else {
+            return RegistrationResponse{
+                .success = false,
+                .message = "Auth key required",
+            };
+        }
+    }
+
     std.log.info("Registration request: public={s}:{}, private={s}:{}, key_len={}", .{
         request.public_ip,
         request.public_port,
@@ -91,18 +110,15 @@ pub fn validateRegistration(request: RegistrationRequest) RegistrationResponse {
     };
 }
 
-// Pure function: Create auth required response
-pub fn createAuthRequiredResponse() RegistrationResponse {
-    return RegistrationResponse{
-        .success = false,
-        .message = "Auth key required",
-    };
-}
+fn requiresAuth(store: *kv.KVStore) bool {
+    store.mutex.lock();
+    defer store.mutex.unlock();
 
-// Pure function: Create invalid auth response
-pub fn createInvalidAuthResponse() RegistrationResponse {
-    return RegistrationResponse{
-        .success = false,
-        .message = "Invalid auth key",
-    };
+    var it = store.kv_state.map.iterator();
+    while (it.next()) |entry| {
+        if (std.mem.startsWith(u8, entry.key_ptr.*, "__auth:apikey:")) {
+            return true;
+        }
+    }
+    return false;
 }

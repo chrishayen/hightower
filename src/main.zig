@@ -4,7 +4,7 @@ const posix = std.posix;
 
 const stun_server = @import("stun_server.zig");
 const stun_client = @import("stun_client.zig");
-const kv = @import("core/kv/store.zig");
+const kv = @import("kv_store.zig");
 const kv_shell = @import("kv_shell.zig");
 const gateway_server = @import("gateway_server.zig");
 

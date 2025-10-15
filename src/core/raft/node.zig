@@ -29,10 +29,6 @@ pub fn Node(comptime T: type) type {
         // Leader tracking
         current_leader: ?types.NodeId,
 
-        // Timing state (milliseconds)
-        last_heartbeat_time: u64,
-        election_deadline: u64,
-
         // Vote tracking for candidates
         votes_received: std.AutoHashMap(types.NodeId, bool),
 
@@ -61,8 +57,6 @@ pub fn Node(comptime T: type) type {
                 .timing_config = timing,
                 .state_machine = sm,
                 .current_leader = null,
-                .last_heartbeat_time = 0,
-                .election_deadline = timing.randomElectionTimeout(prng.random()),
                 .votes_received = std.AutoHashMap(types.NodeId, bool).init(allocator),
                 .rng = prng.random(),
                 .allocator = allocator,
@@ -173,10 +167,9 @@ pub fn Node(comptime T: type) type {
             try self.votes_received.put(self.node_id, true);
         }
 
-        // Reset election timeout (call after receiving message from leader)
-        pub fn resetElectionTimeout(self: *Self, now: u64) void {
-            self.last_heartbeat_time = now;
-            self.election_deadline = now + self.timing_config.randomElectionTimeout(self.rng);
+        // Generate a random election timeout delay
+        pub fn randomElectionTimeout(self: *Self) u64 {
+            return self.timing_config.randomElectionTimeout(self.rng);
         }
 
         // Record vote received during candidacy
@@ -355,36 +348,11 @@ pub fn Node(comptime T: type) type {
             return self.persistent_state.current_term;
         }
 
-        // Tick - called periodically by the shell to process timeouts
-        pub fn tick(self: *Self, now: u64) !actions_mod.ActionList {
+        // Called when election timeout fires - transitions to candidate and requests votes
+        pub fn handleElectionTimeout(self: *Self) !actions_mod.ActionList {
             var actions = actions_mod.ActionList.init(self.allocator);
 
-            switch (self.node_state) {
-                .follower, .candidate => try self.tickFollowerOrCandidate(now, &actions),
-                .leader => try self.tickLeader(now, &actions),
-            }
-
-            // Schedule next tick
-            const next_tick_delay = self.calculateNextTickDelay(now);
-            try actions.append(.{ .schedule_tick = next_tick_delay });
-
-            return actions;
-        }
-
-        fn calculateNextTickDelay(self: *Self, now: u64) u64 {
-            if (self.node_state == .leader) {
-                return self.timing_config.heartbeat_interval;
-            }
-            return @min(self.timing_config.heartbeat_interval, self.election_deadline -| now);
-        }
-
-        fn tickFollowerOrCandidate(self: *Self, now: u64, actions: *actions_mod.ActionList) !void {
-            if (now < self.election_deadline) {
-                return;
-            }
-
             try self.becomeCandidate();
-            self.election_deadline = now + self.timing_config.randomElectionTimeout(self.rng);
 
             const last_log_index = self.persistent_state.getLastLogIndex();
             const last_log_term = self.persistent_state.getLastLogTerm();
@@ -406,26 +374,31 @@ pub fn Node(comptime T: type) type {
                     },
                 });
             }
+
+            return actions;
         }
 
-        fn tickLeader(self: *Self, now: u64, actions: *actions_mod.ActionList) !void {
-            if (now < self.last_heartbeat_time + self.timing_config.heartbeat_interval) {
-                return;
+        // Called when heartbeat interval fires - sends heartbeats/AppendEntries to followers
+        pub fn handleHeartbeatTimeout(self: *Self) !actions_mod.ActionList {
+            var actions = actions_mod.ActionList.init(self.allocator);
+
+            if (self.node_state != .leader) {
+                return actions;
             }
 
-            self.last_heartbeat_time = now;
-
-            const ls = &(self.leader_state orelse return);
+            const ls = &(self.leader_state orelse return actions);
 
             for (self.cluster_config.nodes) |node| {
                 if (node.id == self.node_id) {
                     continue;
                 }
 
-                try self.buildAndSendAppendEntries(node.id, ls, actions);
+                try self.buildAndSendAppendEntries(node.id, ls, &actions);
             }
 
             try self.updateCommitIndex();
+
+            return actions;
         }
 
         fn buildAndSendAppendEntries(

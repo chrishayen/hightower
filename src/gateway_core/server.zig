@@ -1,8 +1,8 @@
 const std = @import("std");
 const http = std.http;
 const net = std.net;
-const registration = @import("registration.zig");
-const kv = @import("../kv/store.zig");
+const registration_handler = @import("registration_handler.zig");
+const kv_store_mod = @import("../kv_store.zig");
 
 pub const ServerConfig = struct {
     port: u16 = 8080,
@@ -12,9 +12,9 @@ pub const ServerConfig = struct {
 
 pub const Server = struct {
     config: ServerConfig,
-    kv_store: *kv.KVStore,
+    kv_store: *kv_store_mod.KVStore,
 
-    pub fn init(config: ServerConfig, kv_store: *kv.KVStore) Server {
+    pub fn init(config: ServerConfig, kv_store: *kv_store_mod.KVStore) Server {
         return Server{
             .config = config,
             .kv_store = kv_store,
@@ -71,7 +71,7 @@ pub const Server = struct {
             return;
         }
 
-        const response = registration.handleRegistration(self.kv_store, allocator, request.body) catch |err| {
+        const response = registration_handler.handleRegistration(self.kv_store, allocator, request.body) catch |err| {
             std.log.err("Registration error: {}", .{err});
             try sendResponse(stream, 400, "application/json", "{\"success\":false,\"message\":\"Invalid request\"}");
             return;

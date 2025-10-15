@@ -1,13 +1,14 @@
 const std = @import("std");
 const crypto_mod = @import("crypto.zig");
-const store_mod = @import("store.zig");
+
+// Pure types and validation logic (Functional Core)
 
 pub const AuthError = error{
     UserNotFound,
     UserAlreadyExists,
     ApiKeyNotFound,
     InvalidCredentials,
-} || std.mem.Allocator.Error || store_mod.KVError;
+} || std.mem.Allocator.Error;
 
 // User structure
 pub const User = struct {
@@ -157,29 +158,21 @@ pub const ApiKeyData = struct {
     }
 };
 
-// User operations
-pub fn createUser(
-    store: *store_mod.KVStore,
+// Pure function: Create user data structure
+pub fn createUserData(
     allocator: std.mem.Allocator,
     username: []const u8,
     password: []const u8,
     metadata: []const u8,
-) !void {
+    now: i64,
+) !struct { key: []const u8, user_json: []const u8 } {
     const key = try std.fmt.allocPrint(allocator, "__auth:user:{s}", .{username});
-    defer allocator.free(key);
+    errdefer allocator.free(key);
 
-    // Check if user already exists
-    if (store.contains(key)) {
-        return AuthError.UserAlreadyExists;
-    }
-
-    // Hash password
     const password_hash = try crypto_mod.PasswordHash.fromPassword(allocator, password);
     const password_hash_str = try password_hash.toString(allocator);
     defer allocator.free(password_hash_str);
 
-    // Create user
-    const now = std.time.milliTimestamp();
     const user = User{
         .username = username,
         .password_hash = password_hash_str,
@@ -189,106 +182,55 @@ pub fn createUser(
     };
 
     const user_json = try user.toJson(allocator);
-    defer allocator.free(user_json);
-
-    try store.put(key, user_json);
+    return .{ .key = key, .user_json = user_json };
 }
 
-pub fn getUser(
-    store: *store_mod.KVStore,
+// Pure function: Verify password against hash
+pub fn verifyPasswordHash(
     allocator: std.mem.Allocator,
-    username: []const u8,
-) !User {
-    const key = try std.fmt.allocPrint(allocator, "__auth:user:{s}", .{username});
-    defer allocator.free(key);
-
-    const user_json = store.get(allocator, key) catch |err| {
-        if (err == store_mod.KVError.KeyNotFound) {
-            return AuthError.UserNotFound;
-        }
-        return err;
-    };
-    defer allocator.free(user_json);
-
-    return try User.fromJson(allocator, user_json);
-}
-
-pub fn deleteUser(
-    store: *store_mod.KVStore,
-    allocator: std.mem.Allocator,
-    username: []const u8,
-) !void {
-    const key = try std.fmt.allocPrint(allocator, "__auth:user:{s}", .{username});
-    defer allocator.free(key);
-
-    store.delete(key) catch |err| {
-        if (err == store_mod.KVError.KeyNotFound) {
-            return AuthError.UserNotFound;
-        }
-        return err;
-    };
-}
-
-pub fn verifyPassword(
-    store: *store_mod.KVStore,
-    allocator: std.mem.Allocator,
-    username: []const u8,
     password: []const u8,
+    password_hash_str: []const u8,
 ) !void {
-    const user = try getUser(store, allocator, username);
-    defer user.deinit(allocator);
-
-    const password_hash = try crypto_mod.PasswordHash.fromString(user.password_hash);
+    const password_hash = try crypto_mod.PasswordHash.fromString(password_hash_str);
     password_hash.verify(allocator, password) catch {
         return AuthError.InvalidCredentials;
     };
 }
 
-pub fn updatePassword(
-    store: *store_mod.KVStore,
+// Pure function: Update user password
+pub fn updateUserPassword(
     allocator: std.mem.Allocator,
-    username: []const u8,
+    user: User,
     new_password: []const u8,
-) !void {
-    const user = try getUser(store, allocator, username);
-    defer user.deinit(allocator);
-
-    // Hash new password
+    now: i64,
+) !struct { key: []const u8, user_json: []const u8 } {
     const password_hash = try crypto_mod.PasswordHash.fromPassword(allocator, new_password);
     const password_hash_str = try password_hash.toString(allocator);
     defer allocator.free(password_hash_str);
 
-    // Update user
     const updated_user = User{
         .username = user.username,
         .password_hash = password_hash_str,
         .created_at = user.created_at,
-        .updated_at = std.time.milliTimestamp(),
+        .updated_at = now,
         .metadata = user.metadata,
     };
 
-    const key = try std.fmt.allocPrint(allocator, "__auth:user:{s}", .{username});
-    defer allocator.free(key);
+    const key = try std.fmt.allocPrint(allocator, "__auth:user:{s}", .{user.username});
+    errdefer allocator.free(key);
 
     const user_json = try updated_user.toJson(allocator);
-    defer allocator.free(user_json);
-
-    try store.put(key, user_json);
+    return .{ .key = key, .user_json = user_json };
 }
 
-// API Key operations
-pub fn createApiKey(
-    store: *store_mod.KVStore,
+// Pure function: Create API key data
+pub fn createApiKeyData(
     allocator: std.mem.Allocator,
     username: []const u8,
     expires_in_days: ?u32,
     metadata: []const u8,
-) !struct { key_id: []const u8, key: []const u8 } {
-    // Verify user exists
-    const user = try getUser(store, allocator, username);
-    defer user.deinit(allocator);
-
-    // Generate API key and ID
+    now: i64,
+) !struct { key_id: []const u8, key_str: []const u8, kv_key: []const u8, api_key_json: []const u8 } {
     const api_key = try crypto_mod.ApiKey.generate();
     const key_id = try crypto_mod.generateUuid(allocator);
     errdefer allocator.free(key_id);
@@ -296,20 +238,16 @@ pub fn createApiKey(
     const key_str = try api_key.toString(allocator);
     errdefer allocator.free(key_str);
 
-    // Hash the key for storage
     const key_hash = api_key.hash();
     const key_hash_hex = std.fmt.bytesToHex(&key_hash, .lower);
     const key_hash_str = try allocator.dupe(u8, &key_hash_hex);
     defer allocator.free(key_hash_str);
 
-    // Calculate expiration
-    const now = std.time.milliTimestamp();
     const expires_at = if (expires_in_days) |days|
         now + (@as(i64, days) * 24 * 60 * 60 * 1000)
     else
         null;
 
-    // Create API key data
     const api_key_data = ApiKeyData{
         .key_id = key_id,
         .key_hash = key_hash_str,
@@ -321,121 +259,46 @@ pub fn createApiKey(
     };
 
     const kv_key = try std.fmt.allocPrint(allocator, "__auth:apikey:{s}", .{key_id});
-    defer allocator.free(kv_key);
+    errdefer allocator.free(kv_key);
 
     const api_key_json = try api_key_data.toJson(allocator);
-    defer allocator.free(api_key_json);
 
-    try store.put(kv_key, api_key_json);
-
-    return .{ .key_id = key_id, .key = key_str };
-}
-
-pub fn revokeApiKey(
-    store: *store_mod.KVStore,
-    allocator: std.mem.Allocator,
-    key_id: []const u8,
-) !void {
-    const key = try std.fmt.allocPrint(allocator, "__auth:apikey:{s}", .{key_id});
-    defer allocator.free(key);
-
-    store.delete(key) catch |err| {
-        if (err == store_mod.KVError.KeyNotFound) {
-            return AuthError.ApiKeyNotFound;
-        }
-        return err;
+    return .{
+        .key_id = key_id,
+        .key_str = key_str,
+        .kv_key = kv_key,
+        .api_key_json = api_key_json,
     };
 }
 
-pub fn verifyApiKey(
-    store: *store_mod.KVStore,
-    allocator: std.mem.Allocator,
-    key_str: []const u8,
-) ![]const u8 {
-    // Parse the key
-    const api_key = try crypto_mod.ApiKey.fromString(key_str);
+// Pure function: Verify API key hash
+pub fn verifyApiKeyHash(api_key: crypto_mod.ApiKey, stored_hash: [32]u8) bool {
+    return api_key.verifyHash(stored_hash);
+}
 
-    store.mutex.lock();
-    defer store.mutex.unlock();
-
-    // Find the matching key by iterating through all API keys
-    var it = store.kv_state.map.iterator();
-    while (it.next()) |entry| {
-        const kv_key = entry.key_ptr.*;
-
-        // Check if this is an API key entry
-        if (!std.mem.startsWith(u8, kv_key, "__auth:apikey:")) {
-            continue;
-        }
-
-        // Parse the API key data
-        const api_key_data = ApiKeyData.fromJson(allocator, entry.value_ptr.*) catch continue;
-        defer api_key_data.deinit(allocator);
-
-        // Parse stored hash
-        var stored_hash: [32]u8 = undefined;
-        _ = std.fmt.hexToBytes(&stored_hash, api_key_data.key_hash) catch continue;
-
-        // Verify hash
-        if (!api_key.verifyHash(stored_hash)) {
-            continue;
-        }
-
-        // Check expiration
-        if (api_key_data.expires_at) |exp| {
-            if (std.time.milliTimestamp() > exp) {
-                return AuthError.InvalidCredentials;
-            }
-        }
-
-        // Update last_used - must unlock before calling put
-        const kv_key_copy = try allocator.dupe(u8, kv_key);
-        defer allocator.free(kv_key_copy);
-
-        const username_copy = try allocator.dupe(u8, api_key_data.username);
-        errdefer allocator.free(username_copy);
-
-        const updated_data = ApiKeyData{
-            .key_id = api_key_data.key_id,
-            .key_hash = api_key_data.key_hash,
-            .username = api_key_data.username,
-            .created_at = api_key_data.created_at,
-            .expires_at = api_key_data.expires_at,
-            .last_used = std.time.milliTimestamp(),
-            .metadata = api_key_data.metadata,
-        };
-
-        const updated_json = try updated_data.toJson(allocator);
-        defer allocator.free(updated_json);
-
-        // Unlock before calling put (which also locks)
-        store.mutex.unlock();
-        store.put(kv_key_copy, updated_json) catch {
-            allocator.free(username_copy);
-            return AuthError.InvalidCredentials;
-        };
-
-        return username_copy;
+// Pure function: Check if API key is expired
+pub fn isApiKeyExpired(api_key_data: ApiKeyData, now: i64) bool {
+    if (api_key_data.expires_at) |exp| {
+        return now > exp;
     }
-
-    return AuthError.InvalidCredentials;
+    return false;
 }
 
-pub fn getApiKey(
-    store: *store_mod.KVStore,
+// Pure function: Update API key last used
+pub fn updateApiKeyLastUsed(
     allocator: std.mem.Allocator,
-    key_id: []const u8,
-) !ApiKeyData {
-    const key = try std.fmt.allocPrint(allocator, "__auth:apikey:{s}", .{key_id});
-    defer allocator.free(key);
-
-    const api_key_json = store.get(allocator, key) catch |err| {
-        if (err == store_mod.KVError.KeyNotFound) {
-            return AuthError.ApiKeyNotFound;
-        }
-        return err;
+    api_key_data: ApiKeyData,
+    now: i64,
+) ![]const u8 {
+    const updated_data = ApiKeyData{
+        .key_id = api_key_data.key_id,
+        .key_hash = api_key_data.key_hash,
+        .username = api_key_data.username,
+        .created_at = api_key_data.created_at,
+        .expires_at = api_key_data.expires_at,
+        .last_used = now,
+        .metadata = api_key_data.metadata,
     };
-    defer allocator.free(api_key_json);
 
-    return try ApiKeyData.fromJson(allocator, api_key_json);
+    return try updated_data.toJson(allocator);
 }
