@@ -355,6 +355,9 @@ pub fn verifyApiKey(
     // Parse the key
     const api_key = try crypto_mod.ApiKey.fromString(key_str);
 
+    store.mutex.lock();
+    defer store.mutex.unlock();
+
     // Find the matching key by iterating through all API keys
     var it = store.kv_state.map.iterator();
     while (it.next()) |entry| {
@@ -385,7 +388,13 @@ pub fn verifyApiKey(
             }
         }
 
-        // Update last_used
+        // Update last_used - must unlock before calling put
+        const kv_key_copy = try allocator.dupe(u8, kv_key);
+        defer allocator.free(kv_key_copy);
+
+        const username_copy = try allocator.dupe(u8, api_key_data.username);
+        errdefer allocator.free(username_copy);
+
         const updated_data = ApiKeyData{
             .key_id = api_key_data.key_id,
             .key_hash = api_key_data.key_hash,
@@ -399,9 +408,14 @@ pub fn verifyApiKey(
         const updated_json = try updated_data.toJson(allocator);
         defer allocator.free(updated_json);
 
-        try store.put(kv_key, updated_json);
+        // Unlock before calling put (which also locks)
+        store.mutex.unlock();
+        store.put(kv_key_copy, updated_json) catch {
+            allocator.free(username_copy);
+            return AuthError.InvalidCredentials;
+        };
 
-        return try allocator.dupe(u8, api_key_data.username);
+        return username_copy;
     }
 
     return AuthError.InvalidCredentials;

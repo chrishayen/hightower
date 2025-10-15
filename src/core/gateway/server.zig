@@ -71,7 +71,7 @@ pub const Server = struct {
             return;
         }
 
-        const response = registration.handleRegistration(allocator, request.body, self.config.auth_key) catch |err| {
+        const response = registration.handleRegistration(self.kv_store, allocator, request.body) catch |err| {
             std.log.err("Registration error: {}", .{err});
             try sendResponse(stream, 400, "application/json", "{\"success\":false,\"message\":\"Invalid request\"}");
             return;

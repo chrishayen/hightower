@@ -26,6 +26,11 @@ pub const Server = struct {
         // Bootstrap admin user on first run
         try bootstrapAdminUser(allocator, &kv_store);
 
+        // Bootstrap initial auth key if provided
+        if (config.auth_key) |auth_key| {
+            try bootstrapInitialAuthKey(allocator, &kv_store, auth_key);
+        }
+
         return Server{
             .config = config,
             .kv_store = kv_store,
@@ -186,4 +191,50 @@ fn bootstrapAdminUser(allocator: std.mem.Allocator, store: *kv.KVStore) !void {
 
     // Print password to console (only on first run)
     log.warn("Admin user created - username: admin, password: {s}", .{password});
+}
+
+fn bootstrapInitialAuthKey(allocator: std.mem.Allocator, store: *kv.KVStore, auth_key: []const u8) !void {
+    const marker_key = "__auth:initial_key_marker";
+
+    if (store.contains(marker_key)) {
+        return;
+    }
+
+    const api_key = try crypto_mod.ApiKey.fromString(auth_key);
+    const key_id = try crypto_mod.generateUuid(allocator);
+    errdefer allocator.free(key_id);
+
+    const key_hash = api_key.hash();
+    const key_hash_hex = std.fmt.bytesToHex(&key_hash, .lower);
+    const key_hash_str = try allocator.dupe(u8, &key_hash_hex);
+    defer allocator.free(key_hash_str);
+
+    const now = std.time.milliTimestamp();
+    const metadata = try std.fmt.allocPrint(
+        allocator,
+        "{{\"type\":\"initial_auth_key\",\"created_at\":{}}}",
+        .{now},
+    );
+    defer allocator.free(metadata);
+
+    const api_key_data = auth_mod.ApiKeyData{
+        .key_id = key_id,
+        .key_hash = key_hash_str,
+        .username = "admin",
+        .created_at = now,
+        .expires_at = null,
+        .last_used = null,
+        .metadata = metadata,
+    };
+
+    const kv_key = try std.fmt.allocPrint(allocator, "__auth:apikey:{s}", .{key_id});
+    defer allocator.free(kv_key);
+
+    const api_key_json = try api_key_data.toJson(allocator);
+    defer allocator.free(api_key_json);
+
+    try store.put(kv_key, api_key_json);
+    try store.put(marker_key, "1");
+
+    log.info("Initial auth key saved as API key for admin user", .{});
 }

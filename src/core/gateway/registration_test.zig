@@ -1,6 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
 const registration = @import("registration.zig");
+const kv = @import("../kv/store.zig");
+const auth_mod = @import("../kv/auth.zig");
+const crypto_mod = @import("../kv/crypto.zig");
 
 test "RegistrationRequest.fromJson with valid data and auth key" {
     const allocator = testing.allocator;
@@ -88,6 +91,10 @@ test "RegistrationResponse.toJson" {
 test "handleRegistration with no auth required and client provides auth" {
     const allocator = testing.allocator;
 
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+    try store.bootstrap("localhost:0");
+
     const json =
         \\{
         \\  "public_ip": "1.2.3.4",
@@ -99,7 +106,7 @@ test "handleRegistration with no auth required and client provides auth" {
         \\}
     ;
 
-    const response = try registration.handleRegistration(allocator, json, null);
+    const response = try registration.handleRegistration(&store, allocator, json);
 
     try testing.expectEqual(true, response.success);
     try testing.expectEqualStrings("Registration successful", response.message);
@@ -108,6 +115,10 @@ test "handleRegistration with no auth required and client provides auth" {
 test "handleRegistration with no auth required and client doesn't provide auth" {
     const allocator = testing.allocator;
 
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+    try store.bootstrap("localhost:0");
+
     const json =
         \\{
         \\  "public_ip": "1.2.3.4",
@@ -118,47 +129,77 @@ test "handleRegistration with no auth required and client doesn't provide auth" 
         \\}
     ;
 
-    const response = try registration.handleRegistration(allocator, json, null);
+    const response = try registration.handleRegistration(&store, allocator, json);
 
     try testing.expectEqual(true, response.success);
     try testing.expectEqualStrings("Registration successful", response.message);
 }
 
-test "handleRegistration with valid auth key" {
+test "handleRegistration with valid API key" {
     const allocator = testing.allocator;
 
-    const json =
-        \\{
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+    try store.bootstrap("localhost:0");
+
+    try auth_mod.createUser(&store, allocator, "testuser", "password123", "{}");
+
+    const key_result = try auth_mod.createApiKey(&store, allocator, "testuser", null, "{}");
+    defer allocator.free(key_result.key_id);
+    defer allocator.free(key_result.key);
+
+    const json_template =
+        \\{{
         \\  "public_ip": "1.2.3.4",
         \\  "public_port": 51820,
         \\  "private_ip": "10.0.0.1",
         \\  "private_port": 51821,
         \\  "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        \\  "auth_key": "correctkey"
-        \\}
+        \\  "auth_key": "{s}"
+        \\}}
     ;
 
-    const response = try registration.handleRegistration(allocator, json, "correctkey");
+    const json = try std.fmt.allocPrint(allocator, json_template, .{key_result.key});
+    defer allocator.free(json);
+
+    const response = try registration.handleRegistration(&store, allocator, json);
 
     try testing.expectEqual(true, response.success);
     try testing.expectEqualStrings("Registration successful", response.message);
 }
 
-test "handleRegistration with invalid auth key" {
+test "handleRegistration with invalid API key" {
     const allocator = testing.allocator;
 
-    const json =
-        \\{
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+    try store.bootstrap("localhost:0");
+
+    try auth_mod.createUser(&store, allocator, "testuser", "password123", "{}");
+
+    const key_result = try auth_mod.createApiKey(&store, allocator, "testuser", null, "{}");
+    defer allocator.free(key_result.key_id);
+    defer allocator.free(key_result.key);
+
+    const wrong_key = try crypto_mod.ApiKey.generate();
+    const wrong_key_str = try wrong_key.toString(allocator);
+    defer allocator.free(wrong_key_str);
+
+    const json_template =
+        \\{{
         \\  "public_ip": "1.2.3.4",
         \\  "public_port": 51820,
         \\  "private_ip": "10.0.0.1",
         \\  "private_port": 51821,
         \\  "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        \\  "auth_key": "wrongkey"
-        \\}
+        \\  "auth_key": "{s}"
+        \\}}
     ;
 
-    const response = try registration.handleRegistration(allocator, json, "correctkey");
+    const json = try std.fmt.allocPrint(allocator, json_template, .{wrong_key_str});
+    defer allocator.free(json);
+
+    const response = try registration.handleRegistration(&store, allocator, json);
 
     try testing.expectEqual(false, response.success);
     try testing.expectEqualStrings("Invalid auth key", response.message);
@@ -167,6 +208,16 @@ test "handleRegistration with invalid auth key" {
 test "handleRegistration with missing auth key when required" {
     const allocator = testing.allocator;
 
+    var store = try kv.KVStore.init(allocator, 1);
+    defer store.deinit(allocator);
+    try store.bootstrap("localhost:0");
+
+    try auth_mod.createUser(&store, allocator, "testuser", "password123", "{}");
+
+    const key_result = try auth_mod.createApiKey(&store, allocator, "testuser", null, "{}");
+    defer allocator.free(key_result.key_id);
+    defer allocator.free(key_result.key);
+
     const json =
         \\{
         \\  "public_ip": "1.2.3.4",
@@ -177,7 +228,7 @@ test "handleRegistration with missing auth key when required" {
         \\}
     ;
 
-    const response = try registration.handleRegistration(allocator, json, "correctkey");
+    const response = try registration.handleRegistration(&store, allocator, json);
 
     try testing.expectEqual(false, response.success);
     try testing.expectEqualStrings("Auth key required", response.message);

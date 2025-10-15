@@ -172,6 +172,7 @@ pub const KVStore = struct {
     node: raft.Node(KVStateMachine),
     kv_state: *KVStateMachine,
     master_key: ?crypto_mod.EncryptionKey,
+    mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, node_id: raft_types.NodeId) !KVStore {
         const kv_state = try allocator.create(KVStateMachine);
@@ -191,6 +192,7 @@ pub const KVStore = struct {
             .node = node,
             .kv_state = kv_state,
             .master_key = null,
+            .mutex = std.Thread.Mutex{},
         };
     }
 
@@ -215,6 +217,9 @@ pub const KVStore = struct {
 
     // Put a key-value pair
     pub fn put(self: *KVStore, key: []const u8, value: []const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const command = try std.fmt.allocPrint(
             self.node.allocator,
             "put:{}:{s}:{s}",
@@ -228,6 +233,9 @@ pub const KVStore = struct {
 
     // Get a value by key
     pub fn get(self: *KVStore, allocator: std.mem.Allocator, key: []const u8) ![]const u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (self.kv_state.map.get(key)) |value| {
             return try allocator.dupe(u8, value);
         }
@@ -236,6 +244,9 @@ pub const KVStore = struct {
 
     // Delete a key
     pub fn delete(self: *KVStore, key: []const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const command = try std.fmt.allocPrint(
             self.node.allocator,
             "delete:{}:{s}",
@@ -249,11 +260,17 @@ pub const KVStore = struct {
 
     // Check if a key exists
     pub fn contains(self: *KVStore, key: []const u8) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         return self.kv_state.map.contains(key);
     }
 
     // Get the number of keys
     pub fn count(self: *KVStore) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         return self.kv_state.map.count();
     }
 
