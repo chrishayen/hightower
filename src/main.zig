@@ -6,6 +6,7 @@ const stun_server = @import("stun_server.zig");
 const stun_client = @import("stun_client.zig");
 const kv = @import("core/kv/store.zig");
 const kv_shell = @import("kv_shell.zig");
+const gateway_server = @import("gateway_server.zig");
 
 const log = std.log.scoped(.cli);
 
@@ -18,11 +19,12 @@ const Command = enum {
 
 const RunSubcommand = enum {
     stun,
+    gateway,
 };
 
 const KVSubcommand = enum {
     init,
-    connect,
+    open,
 };
 
 fn printHelp() void {
@@ -33,18 +35,26 @@ fn printHelp() void {
         \\  ht run <service>          Start a service
         \\  ht stun <address> [port]  Query a STUN server
         \\  ht kv init <path>         Create a new KV store at path
-        \\  ht kv connect <path>      Connect to KV store and start interactive session
+        \\  ht kv open <path>         Open KV store and start interactive session
         \\  ht help                   Show this help message
         \\
         \\Services:
         \\  stun                      Start the STUN server
+        \\  gateway                   Start the WireGuard gateway server
+        \\
+        \\Gateway Options:
+        \\  --default-auth-key <key>  Set the auth key for registration (or use HT_DEFAULT_AUTH)
+        \\  --kv-path <path>          Set the KV store path (default: ~/.ht/gateway, or use HT_KV_PATH)
         \\
         \\Examples:
         \\  ht run stun
+        \\  ht run gateway
+        \\  ht run gateway --default-auth-key mykey --kv-path ./data
+        \\  HT_DEFAULT_AUTH=mykey HT_KV_PATH=./data ht run gateway
         \\  ht stun stun.l.google.com 19302
         \\  ht stun stun.l.google.com
         \\  ht kv init ./mystore
-        \\  ht kv connect ./mystore
+        \\  ht kv open ./mystore
         \\
     , .{});
 }
@@ -59,12 +69,13 @@ fn parseCommand(arg: []const u8) ?Command {
 
 fn parseRunSubcommand(arg: []const u8) ?RunSubcommand {
     if (std.mem.eql(u8, arg, "stun")) return .stun;
+    if (std.mem.eql(u8, arg, "gateway")) return .gateway;
     return null;
 }
 
 fn parseKVSubcommand(arg: []const u8) ?KVSubcommand {
     if (std.mem.eql(u8, arg, "init")) return .init;
-    if (std.mem.eql(u8, arg, "connect")) return .connect;
+    if (std.mem.eql(u8, arg, "open")) return .open;
     return null;
 }
 
@@ -80,6 +91,91 @@ fn runStunServer(allocator: std.mem.Allocator) !void {
     const server_allocator = gpa.allocator();
 
     try server.run(server_allocator);
+}
+
+fn getEnvOrNull(key: []const u8) ?[]const u8 {
+    return std.posix.getenv(key);
+}
+
+fn expandHomePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (!std.mem.startsWith(u8, path, "~")) {
+        return try allocator.dupe(u8, path);
+    }
+
+    const home = getEnvOrNull("HOME") orelse return error.HomeNotSet;
+
+    if (path.len == 1) {
+        return try allocator.dupe(u8, home);
+    }
+
+    if (path[1] == '/') {
+        return try std.fs.path.join(allocator, &[_][]const u8{ home, path[2..] });
+    }
+
+    return try allocator.dupe(u8, path);
+}
+
+fn ensureDirectoryExists(path: []const u8) !void {
+    std.fs.cwd().makePath(path) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            return err;
+        }
+    };
+}
+
+fn parseGatewayConfig(allocator: std.mem.Allocator, args: [][:0]u8, start_index: usize) !gateway_server.ServerConfig {
+    var auth_key: ?[]const u8 = null;
+    var kv_path: ?[]const u8 = null;
+
+    var i = start_index;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+
+        if (std.mem.eql(u8, arg, "--default-auth-key")) {
+            if (i + 1 >= args.len) {
+                return error.MissingAuthKey;
+            }
+            i += 1;
+            auth_key = try allocator.dupe(u8, args[i]);
+        } else if (std.mem.eql(u8, arg, "--kv-path")) {
+            if (i + 1 >= args.len) {
+                return error.MissingKvPath;
+            }
+            i += 1;
+            kv_path = try allocator.dupe(u8, args[i]);
+        }
+    }
+
+    if (auth_key == null) {
+        if (getEnvOrNull("HT_DEFAULT_AUTH")) |env_auth| {
+            auth_key = try allocator.dupe(u8, env_auth);
+        }
+    }
+
+    if (kv_path == null) {
+        if (getEnvOrNull("HT_KV_PATH")) |env_path| {
+            kv_path = try allocator.dupe(u8, env_path);
+        } else {
+            kv_path = try expandHomePath(allocator, "~/.ht/gateway");
+        }
+    }
+
+    const final_kv_path = kv_path.?;
+    try ensureDirectoryExists(final_kv_path);
+
+    return gateway_server.ServerConfig{
+        .auth_key = auth_key,
+        .kv_path = final_kv_path,
+    };
+}
+
+fn runGateway(allocator: std.mem.Allocator, args: [][:0]u8) !void {
+    const config = try parseGatewayConfig(allocator, args, 3);
+
+    var server = try gateway_server.Server.init(allocator, config);
+    defer server.deinit();
+
+    try server.run();
 }
 
 fn queryStunServer(allocator: std.mem.Allocator, server_host: []const u8, server_port: u16) !void {
@@ -108,6 +204,7 @@ fn handleRunCommand(allocator: std.mem.Allocator, args: [][:0]u8) !void {
 
     switch (subcommand) {
         .stun => try runStunServer(allocator),
+        .gateway => try runGateway(allocator, args),
     }
 }
 
@@ -192,7 +289,7 @@ fn createDirectory(path: []const u8) !void {
     };
 }
 
-fn kvConnect(allocator: std.mem.Allocator, path: []const u8) !void {
+fn kvOpen(allocator: std.mem.Allocator, path: []const u8) !void {
     try kv_shell.run(allocator, path);
 }
 
@@ -219,7 +316,7 @@ fn handleKvCommand(allocator: std.mem.Allocator, args: [][:0]u8) !void {
 
     switch (subcommand) {
         .init => try kvInit(allocator, path),
-        .connect => try kvConnect(allocator, path),
+        .open => try kvOpen(allocator, path),
     }
 }
 
@@ -260,11 +357,12 @@ test "parseCommand" {
 
 test "parseRunSubcommand" {
     try std.testing.expectEqual(RunSubcommand.stun, parseRunSubcommand("stun"));
+    try std.testing.expectEqual(RunSubcommand.gateway, parseRunSubcommand("gateway"));
     try std.testing.expectEqual(@as(?RunSubcommand, null), parseRunSubcommand("unknown"));
 }
 
 test "parseKVSubcommand" {
     try std.testing.expectEqual(KVSubcommand.init, parseKVSubcommand("init"));
-    try std.testing.expectEqual(KVSubcommand.connect, parseKVSubcommand("connect"));
+    try std.testing.expectEqual(KVSubcommand.open, parseKVSubcommand("open"));
     try std.testing.expectEqual(@as(?KVSubcommand, null), parseKVSubcommand("unknown"));
 }
