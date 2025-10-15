@@ -1,11 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
 const gateway_server = @import("gateway_server.zig");
-const auth_mod = @import("core/kv/auth.zig");
+const auth_mod = @import("auth_operations.zig");
 const crypto_mod = @import("core/kv/crypto.zig");
 
 test "bootstrapInitialAuthKey saves auth key as API key" {
-    const temp_dir = testing.tmpDir(.{});
+    var temp_dir = testing.tmpDir(.{});
     defer temp_dir.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -34,7 +34,7 @@ test "bootstrapInitialAuthKey saves auth key as API key" {
 }
 
 test "bootstrapInitialAuthKey does not duplicate on restart" {
-    const temp_dir = testing.tmpDir(.{});
+    var temp_dir = testing.tmpDir(.{});
     defer temp_dir.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -88,7 +88,7 @@ test "bootstrapInitialAuthKey does not duplicate on restart" {
 }
 
 test "bootstrapInitialAuthKey skipped when no auth key provided" {
-    const temp_dir = testing.tmpDir(.{});
+    var temp_dir = testing.tmpDir(.{});
     defer temp_dir.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -119,7 +119,7 @@ test "bootstrapInitialAuthKey skipped when no auth key provided" {
 }
 
 test "admin user created on first run" {
-    const temp_dir = testing.tmpDir(.{});
+    var temp_dir = testing.tmpDir(.{});
     defer temp_dir.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;

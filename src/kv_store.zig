@@ -18,7 +18,7 @@ pub const KVStore = struct {
     node: raft.Node(KVStateMachine),
     kv_state: *KVStateMachine,
     master_key: ?crypto_mod.EncryptionKey,
-    mutex: std.Thread.Mutex,
+    mutex: std.Thread.Mutex, // Private: use lock() for safe access
 
     pub fn init(allocator: std.mem.Allocator, node_id: raft_types.NodeId) !KVStore {
         const kv_state = try allocator.create(KVStateMachine);
@@ -152,5 +152,29 @@ pub const KVStore = struct {
         defer allocator.free(enc_key);
 
         try self.delete(enc_key);
+    }
+
+    // Lock guard pattern for safe iteration
+    pub const LockedView = struct {
+        store: *KVStore,
+
+        pub fn deinit(self: LockedView) void {
+            self.store.mutex.unlock();
+        }
+
+        pub fn iterator(self: LockedView) std.StringHashMap([]const u8).Iterator {
+            return self.store.kv_state.map.iterator();
+        }
+
+        pub fn get(self: LockedView, key: []const u8) ?[]const u8 {
+            return self.store.kv_state.map.get(key);
+        }
+    };
+
+    // Get a locked view of the store for safe iteration
+    // MUST call deinit() on the returned LockedView when done
+    pub fn lock(self: *KVStore) LockedView {
+        self.mutex.lock();
+        return LockedView{ .store = self };
     }
 };

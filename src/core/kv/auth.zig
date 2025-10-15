@@ -43,7 +43,20 @@ pub const User = struct {
         const password_hash = try allocator.dupe(u8, obj.get("password_hash").?.string);
         errdefer allocator.free(password_hash);
 
-        const metadata = try allocator.dupe(u8, obj.get("metadata").?.string);
+        const metadata = blk: {
+            const metadata_val = obj.get("metadata").?;
+            switch (metadata_val) {
+                .string => |s| break :blk try allocator.dupe(u8, s),
+                .object => {
+                    var metadata_str = try std.ArrayList(u8).initCapacity(allocator, 64);
+                    defer metadata_str.deinit(allocator);
+                    var writer = metadata_str.writer(allocator);
+                    try writer.print("{any}", .{std.json.fmt(metadata_val, .{})});
+                    break :blk try metadata_str.toOwnedSlice(allocator);
+                },
+                else => break :blk try allocator.dupe(u8, "{}"),
+            }
+        };
         errdefer allocator.free(metadata);
 
         return User{
@@ -124,7 +137,20 @@ pub const ApiKeyData = struct {
         const username = try allocator.dupe(u8, obj.get("username").?.string);
         errdefer allocator.free(username);
 
-        const metadata = try allocator.dupe(u8, obj.get("metadata").?.string);
+        const metadata = blk: {
+            const metadata_val = obj.get("metadata").?;
+            switch (metadata_val) {
+                .string => |s| break :blk try allocator.dupe(u8, s),
+                .object => {
+                    var metadata_str = try std.ArrayList(u8).initCapacity(allocator, 64);
+                    defer metadata_str.deinit(allocator);
+                    var writer = metadata_str.writer(allocator);
+                    try writer.print("{any}", .{std.json.fmt(metadata_val, .{})});
+                    break :blk try metadata_str.toOwnedSlice(allocator);
+                },
+                else => break :blk try allocator.dupe(u8, "{}"),
+            }
+        };
         errdefer allocator.free(metadata);
 
         const expires_at = if (obj.get("expires_at")) |val| switch (val) {

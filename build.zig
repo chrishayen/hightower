@@ -64,6 +64,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    // http.zig dependency
+    const httpz = b.dependency("httpz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const httpz_module = httpz.module("httpz");
+
     const exe = b.addExecutable(.{
         .name = "ht",
         .root_module = b.createModule(.{
@@ -87,6 +94,7 @@ pub fn build(b: *std.Build) void {
                 // importing modules from different packages).
                 .{ .name = "ht", .module = mod },
                 .{ .name = "raft", .module = raft_core_module },
+                .{ .name = "httpz", .module = httpz_module },
             },
         }),
     });
@@ -273,6 +281,35 @@ pub fn build(b: *std.Build) void {
     });
     const run_kv_store_tests = b.addRunArtifact(kv_store_tests);
 
+    // Gateway core server tests
+    const gateway_core_server_test_module = b.createModule(.{
+        .root_source_file = b.path("src/gateway_core_server_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "httpz", .module = httpz_module },
+            .{ .name = "raft", .module = raft_core_module },
+        },
+    });
+    const gateway_core_server_tests = b.addTest(.{
+        .root_module = gateway_core_server_test_module,
+    });
+    const run_gateway_core_server_tests = b.addRunArtifact(gateway_core_server_tests);
+
+    // Gateway server tests
+    const gateway_server_test_module = b.createModule(.{
+        .root_source_file = b.path("src/gateway_server_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "raft", .module = raft_core_module },
+        },
+    });
+    const gateway_server_tests = b.addTest(.{
+        .root_module = gateway_server_test_module,
+    });
+    const run_gateway_server_tests = b.addRunArtifact(gateway_server_tests);
+
     // STUN server executable
     const stun_server_exe = b.addExecutable(.{
         .name = "stun_server",
@@ -325,6 +362,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_raft_node_tests.step);
     test_step.dependOn(&run_kv_state_machine_tests.step);
     test_step.dependOn(&run_kv_store_tests.step);
+    test_step.dependOn(&run_gateway_core_server_tests.step);
+    test_step.dependOn(&run_gateway_server_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

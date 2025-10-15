@@ -236,5 +236,8 @@ fn bootstrapInitialAuthKey(allocator: std.mem.Allocator, store: *kv.KVStore, aut
     try store.put(kv_key, api_key_json);
     try store.put(marker_key, "1");
 
+    // Free the ApiKeyData fields we allocated
+    allocator.free(key_id);
+
     log.info("Initial auth key saved as API key for admin user", .{});
 }

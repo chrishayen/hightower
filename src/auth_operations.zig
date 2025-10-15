@@ -142,51 +142,64 @@ pub fn verifyApiKey(
 ) ![]const u8 {
     const api_key = try crypto_mod.ApiKey.fromString(key_str);
 
-    store.mutex.lock();
-    defer store.mutex.unlock();
+    // Find and prepare data while holding lock
+    const update_data = blk: {
+        var locked_view = store.lock();
+        defer locked_view.deinit();
 
-    var it = store.kv_state.map.iterator();
-    while (it.next()) |entry| {
-        const kv_key = entry.key_ptr.*;
+        var it = locked_view.iterator();
+        while (it.next()) |entry| {
+            const kv_key = entry.key_ptr.*;
 
-        if (!std.mem.startsWith(u8, kv_key, "__auth:apikey:")) {
-            continue;
+            if (!std.mem.startsWith(u8, kv_key, "__auth:apikey:")) {
+                continue;
+            }
+
+            const api_key_data = ApiKeyData.fromJson(allocator, entry.value_ptr.*) catch continue;
+            defer api_key_data.deinit(allocator);
+
+            var stored_hash: [32]u8 = undefined;
+            _ = std.fmt.hexToBytes(&stored_hash, api_key_data.key_hash) catch continue;
+
+            if (!auth_core.verifyApiKeyHash(api_key, stored_hash)) {
+                continue;
+            }
+
+            const now = std.time.milliTimestamp();
+            if (auth_core.isApiKeyExpired(api_key_data, now)) {
+                return AuthError.InvalidCredentials;
+            }
+
+            const kv_key_copy = try allocator.dupe(u8, kv_key);
+            errdefer allocator.free(kv_key_copy);
+
+            const username_copy = try allocator.dupe(u8, api_key_data.username);
+            errdefer allocator.free(username_copy);
+
+            const updated_json = try auth_core.updateApiKeyLastUsed(allocator, api_key_data, now);
+            errdefer allocator.free(updated_json);
+
+            // Return data to be used after lock is released
+            break :blk .{
+                .kv_key = kv_key_copy,
+                .username = username_copy,
+                .updated_json = updated_json,
+            };
         }
 
-        const api_key_data = ApiKeyData.fromJson(allocator, entry.value_ptr.*) catch continue;
-        defer api_key_data.deinit(allocator);
+        return AuthError.InvalidCredentials;
+    };
 
-        var stored_hash: [32]u8 = undefined;
-        _ = std.fmt.hexToBytes(&stored_hash, api_key_data.key_hash) catch continue;
+    // Lock is released here, now do I/O
+    defer allocator.free(update_data.kv_key);
+    defer allocator.free(update_data.updated_json);
 
-        if (!auth_core.verifyApiKeyHash(api_key, stored_hash)) {
-            continue;
-        }
+    store.put(update_data.kv_key, update_data.updated_json) catch {
+        allocator.free(update_data.username);
+        return AuthError.InvalidCredentials;
+    };
 
-        const now = std.time.milliTimestamp();
-        if (auth_core.isApiKeyExpired(api_key_data, now)) {
-            return AuthError.InvalidCredentials;
-        }
-
-        const kv_key_copy = try allocator.dupe(u8, kv_key);
-        defer allocator.free(kv_key_copy);
-
-        const username_copy = try allocator.dupe(u8, api_key_data.username);
-        errdefer allocator.free(username_copy);
-
-        const updated_json = try auth_core.updateApiKeyLastUsed(allocator, api_key_data, now);
-        defer allocator.free(updated_json);
-
-        store.mutex.unlock();
-        store.put(kv_key_copy, updated_json) catch {
-            allocator.free(username_copy);
-            return AuthError.InvalidCredentials;
-        };
-
-        return username_copy;
-    }
-
-    return AuthError.InvalidCredentials;
+    return update_data.username;
 }
 
 pub fn getApiKey(
