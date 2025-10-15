@@ -44,7 +44,7 @@ test "generate creates name with correct suffix format" {
     try testing.expect(last_hyphen_idx != null);
 
     // The suffix should be 4 hex characters
-    const suffix = name[last_hyphen_idx.? + 1..];
+    const suffix = name[last_hyphen_idx.? + 1 ..];
     try testing.expectEqual(@as(usize, 4), suffix.len);
 
     // All characters should be valid hex
