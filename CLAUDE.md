@@ -1,4 +1,5 @@
 - We're going to follow the functional core, imperative shell pattern. The core will live in the src/core/ folder.
+- We're a production system and our code and features need to be complete and production ready.
 - We prefer short, testable functions. Each function should have positive and negative tests.
 - We prefer early return rather than nested logic.
 - Readability of code is of utmost importance.

@@ -2,10 +2,12 @@ const std = @import("std");
 const raft = @import("raft");
 const raft_state_machine = raft.state_machine;
 const raft_types = raft.types;
+const crypto_mod = @import("crypto.zig");
 
 pub const KVError = error{
     KeyNotFound,
     InvalidCommand,
+    NoMasterKey,
 } || raft_types.RaftError;
 
 // Key-Value store state machine
@@ -169,6 +171,7 @@ pub const KVStateMachine = struct {
 pub const KVStore = struct {
     node: raft.Node(KVStateMachine),
     kv_state: *KVStateMachine,
+    master_key: ?crypto_mod.EncryptionKey,
 
     pub fn init(allocator: std.mem.Allocator, node_id: raft_types.NodeId) !KVStore {
         const kv_state = try allocator.create(KVStateMachine);
@@ -187,6 +190,7 @@ pub const KVStore = struct {
         return .{
             .node = node,
             .kv_state = kv_state,
+            .master_key = null,
         };
     }
 
@@ -194,6 +198,14 @@ pub const KVStore = struct {
         self.node.deinit();
         self.kv_state.deinit();
         allocator.destroy(self.kv_state);
+    }
+
+    pub fn setMasterKey(self: *KVStore, key: crypto_mod.EncryptionKey) void {
+        self.master_key = key;
+    }
+
+    pub fn generateAndSetMasterKey(self: *KVStore) !void {
+        self.master_key = try crypto_mod.EncryptionKey.generate();
     }
 
     // Bootstrap as single-node cluster
@@ -243,5 +255,39 @@ pub const KVStore = struct {
     // Get the number of keys
     pub fn count(self: *KVStore) usize {
         return self.kv_state.map.count();
+    }
+
+    // Put an encrypted value
+    pub fn putEncrypted(self: *KVStore, allocator: std.mem.Allocator, key: []const u8, value: []const u8) !void {
+        const master_key = self.master_key orelse return KVError.NoMasterKey;
+
+        const encrypted_value = try master_key.encrypt(allocator, value);
+        defer allocator.free(encrypted_value);
+
+        const enc_key = try std.fmt.allocPrint(allocator, "__enc:{s}", .{key});
+        defer allocator.free(enc_key);
+
+        try self.put(enc_key, encrypted_value);
+    }
+
+    // Get an encrypted value
+    pub fn getEncrypted(self: *KVStore, allocator: std.mem.Allocator, key: []const u8) ![]const u8 {
+        const master_key = self.master_key orelse return KVError.NoMasterKey;
+
+        const enc_key = try std.fmt.allocPrint(allocator, "__enc:{s}", .{key});
+        defer allocator.free(enc_key);
+
+        const encrypted_value = try self.get(allocator, enc_key);
+        defer allocator.free(encrypted_value);
+
+        return try master_key.decrypt(allocator, encrypted_value);
+    }
+
+    // Delete an encrypted value
+    pub fn deleteEncrypted(self: *KVStore, allocator: std.mem.Allocator, key: []const u8) !void {
+        const enc_key = try std.fmt.allocPrint(allocator, "__enc:{s}", .{key});
+        defer allocator.free(enc_key);
+
+        try self.delete(enc_key);
     }
 };
