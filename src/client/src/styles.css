@@ -1,0 +1,11 @@
+html, body, #root { height: 100%; margin: 0; font-family: Inter, system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+.app { display: grid; grid-template-columns: 420px 1fr; height: 100%; }
+aside { padding: 18px; overflow: auto; border-right: 1px solid #334155; background: #111827; }
+main { min-height: 100%; }
+textarea, input { width: 100%; box-sizing: border-box; margin: 6px 0 12px; background: #020617; color: #e2e8f0; border: 1px solid #475569; border-radius: 8px; padding: 10px; }
+textarea { height: 90px; } textarea.input { height: 220px; }
+button { background: #2563eb; color: white; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+pre { max-height: 180px; overflow: auto; background: #020617; padding: 10px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; }
+.empty { display: grid; place-items: center; height: 100%; color: #94a3b8; }
+.react-flow__node { background: #f8fafc; color: #0f172a; }
