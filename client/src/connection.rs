@@ -1,13 +1,17 @@
+use crate::broker::ConnectionBroker;
 use crate::error::ClientError;
-use crate::storage::{ConnectionStorage, StoredConnection, current_timestamp};
+use crate::storage::{current_timestamp, ConnectionStorage, StoredConnection};
 use crate::transport::TransportServer;
-use crate::types::{PeerInfo, RegistrationRequest, RegistrationResponse};
-use wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
-use wireguard::connection::Connection;
+use crate::types::{
+    ConnectionIntent, ConnectionIntentRequest, ConnectionIntentResponse, PeerInfo,
+    RegistrationRequest, RegistrationResponse,
+};
 use reqwest::StatusCode;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
+use wireguard::connection::Connection;
+use wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
 
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8008";
 const API_PATH: &str = "/api/endpoints";
@@ -209,13 +213,13 @@ impl HightowerConnection {
         // 3.2. Create WireGuard transport server on 0.0.0.0:0
         // Binding to 0.0.0.0:0 lets the OS choose an available ephemeral port.
         // This port is then used for STUN discovery to get accurate NAT mapping.
-        let bind_addr: SocketAddr = "0.0.0.0:0".parse().map_err(|e| {
-            ClientError::Configuration(format!("invalid bind address: {}", e))
-        })?;
+        let bind_addr: SocketAddr = "0.0.0.0:0"
+            .parse()
+            .map_err(|e| ClientError::Configuration(format!("invalid bind address: {}", e)))?;
 
-        let connection = Connection::new(bind_addr, private_key)
-            .await
-            .map_err(|e| ClientError::Transport(format!("failed to create transport connection: {}", e)))?;
+        let connection = Connection::new(bind_addr, private_key).await.map_err(|e| {
+            ClientError::Transport(format!("failed to create transport connection: {}", e))
+        })?;
 
         debug!("Created transport connection");
 
@@ -239,13 +243,8 @@ impl HightowerConnection {
         // 3.4. Register with gateway
         // Send our public key and network info to the gateway.
         // Gateway responds with: endpoint ID, assigned IP, registration token, and gateway public key.
-        let registration = register_with_gateway(
-            &endpoint,
-            &auth_token,
-            &public_key_hex,
-            &network_info,
-        )
-        .await?;
+        let registration =
+            register_with_gateway(&endpoint, &auth_token, &public_key_hex, &network_info).await?;
 
         debug!(
             endpoint_id = %registration.endpoint_id,
@@ -256,8 +255,8 @@ impl HightowerConnection {
         // 3.5. Add gateway as WireGuard peer
         // Configure our WireGuard transport to recognize the gateway's public key.
         // This enables the encrypted tunnel for control plane communication.
-        let gateway_public_key_bytes = hex::decode(&registration.gateway_public_key_hex)
-            .map_err(|e| {
+        let gateway_public_key_bytes =
+            hex::decode(&registration.gateway_public_key_hex).map_err(|e| {
                 ClientError::InvalidResponse(format!("invalid gateway public key hex: {}", e))
             })?;
 
@@ -338,16 +337,18 @@ impl HightowerConnection {
         let gateway_public_key: PublicKey25519 = gateway_public_key_bytes
             .as_slice()
             .try_into()
-            .map_err(|e| ClientError::Storage(format!("invalid gateway public key format: {:?}", e)))?;
+            .map_err(|e| {
+                ClientError::Storage(format!("invalid gateway public key format: {:?}", e))
+            })?;
 
         // Create transport connection with stored private key
-        let bind_addr: SocketAddr = "0.0.0.0:0".parse().map_err(|e| {
-            ClientError::Configuration(format!("invalid bind address: {}", e))
-        })?;
+        let bind_addr: SocketAddr = "0.0.0.0:0"
+            .parse()
+            .map_err(|e| ClientError::Configuration(format!("invalid bind address: {}", e)))?;
 
-        let connection = Connection::new(bind_addr, private_key)
-            .await
-            .map_err(|e| ClientError::Transport(format!("failed to create transport connection: {}", e)))?;
+        let connection = Connection::new(bind_addr, private_key).await.map_err(|e| {
+            ClientError::Transport(format!("failed to create transport connection: {}", e))
+        })?;
 
         debug!("Created transport connection with stored keys");
 
@@ -390,7 +391,9 @@ impl HightowerConnection {
     }
 
     /// Connect using default gateway (http://127.0.0.1:8008)
-    pub async fn connect_with_auth_token(auth_token: impl Into<String>) -> Result<Self, ClientError> {
+    pub async fn connect_with_auth_token(
+        auth_token: impl Into<String>,
+    ) -> Result<Self, ClientError> {
         Self::connect(DEFAULT_GATEWAY, auth_token).await
     }
 
@@ -425,15 +428,15 @@ impl HightowerConnection {
 
         // Send HTTP GET request to /ping
         let request = b"GET /ping HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n";
-        stream.send(request)
+        stream
+            .send(request)
             .await
             .map_err(|e| ClientError::Transport(format!("failed to send ping request: {}", e)))?;
 
         // Receive response
-        let response_bytes = stream
-            .recv()
-            .await
-            .map_err(|e| ClientError::Transport(format!("failed to receive ping response: {}", e)))?;
+        let response_bytes = stream.recv().await.map_err(|e| {
+            ClientError::Transport(format!("failed to receive ping response: {}", e))
+        })?;
 
         let response = String::from_utf8_lossy(&response_bytes);
 
@@ -460,9 +463,17 @@ impl HightowerConnection {
 
         // Construct appropriate endpoint URL
         let url = if is_ip {
-            format!("{}/api/endpoints/ip/{}", self.gateway_url.trim_end_matches('/'), endpoint_id_or_ip)
+            format!(
+                "{}/api/endpoints/ip/{}",
+                self.gateway_url.trim_end_matches('/'),
+                endpoint_id_or_ip
+            )
         } else {
-            format!("{}/api/endpoints/id/{}", self.gateway_url.trim_end_matches('/'), endpoint_id_or_ip)
+            format!(
+                "{}/api/endpoints/id/{}",
+                self.gateway_url.trim_end_matches('/'),
+                endpoint_id_or_ip
+            )
         };
 
         let client = reqwest::Client::new();
@@ -517,54 +528,95 @@ impl HightowerConnection {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn dial(&self, peer: &str, port: u16) -> Result<wireguard::connection::Stream, ClientError> {
-        // 1. Get peer info from gateway
-        let peer_info = self.get_peer_info(peer).await?;
+    pub async fn create_connection_intent(
+        &self,
+        target: &str,
+        port: u16,
+    ) -> Result<ConnectionIntentResponse, ClientError> {
+        let url = format!(
+            "{}/api/connections/intent/{}",
+            self.gateway_url.trim_end_matches('/'),
+            self.endpoint_id
+        );
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("X-HT-Auth", &self.auth_token)
+            .json(&ConnectionIntentRequest {
+                target: target.to_string(),
+                port,
+            })
+            .send()
+            .await?;
 
-        // 2. Parse peer's public key
-        let peer_public_key_bytes = hex::decode(&peer_info.public_key_hex)
-            .map_err(|e| ClientError::InvalidResponse(format!("invalid peer public key hex: {}", e)))?;
+        parse_gateway_json_response(response, "create connection intent").await
+    }
 
-        let peer_public_key: PublicKey25519 = peer_public_key_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|e| ClientError::InvalidResponse(format!("invalid peer public key format: {:?}", e)))?;
+    pub async fn get_pending_connection_intents(
+        &self,
+    ) -> Result<Vec<ConnectionIntent>, ClientError> {
+        let url = format!(
+            "{}/api/connections/pending/{}",
+            self.gateway_url.trim_end_matches('/'),
+            self.endpoint_id
+        );
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .header("X-HT-Auth", &self.auth_token)
+            .send()
+            .await?;
 
-        // 3. Add peer to WireGuard (idempotent - safe to call multiple times)
-        self.transport
-            .connection()
-            .add_peer(peer_public_key, peer_info.endpoint())
-            .await
-            .map_err(|e| ClientError::Transport(format!("failed to add peer: {}", e)))?;
+        parse_gateway_json_response(response, "get pending connection intents").await
+    }
 
-        let endpoint_id = peer_info.endpoint_id.as_deref().unwrap_or("unknown");
-        let assigned_ip = peer_info.assigned_ip.as_deref().unwrap_or("unknown");
+    pub async fn sync_pending_peers(&self) -> Result<usize, ClientError> {
+        let intents = self.get_pending_connection_intents().await?;
+        let mut synced = 0;
+
+        for intent in intents {
+            if intent.target_endpoint_id != self.endpoint_id {
+                continue;
+            }
+
+            let key = parse_public_key_hex(&intent.initiator.public_key_hex)?;
+            let endpoint = intent
+                .initiator
+                .ordered_candidates()
+                .first()
+                .map(|candidate| candidate.addr);
+            self.transport
+                .connection()
+                .add_peer(key, endpoint)
+                .await
+                .map_err(|e| {
+                    ClientError::Transport(format!("failed to sync pending peer: {}", e))
+                })?;
+            synced += 1;
+        }
+
+        Ok(synced)
+    }
+
+    pub async fn dial(
+        &self,
+        peer: &str,
+        port: u16,
+    ) -> Result<wireguard::connection::Stream, ClientError> {
+        let intent = self.create_connection_intent(peer, port).await?;
+        let endpoint_id = intent.target.endpoint_id.as_deref().unwrap_or(peer);
 
         debug!(
             endpoint_id = %endpoint_id,
-            peer_ip = %assigned_ip,
             port = port,
-            "Added peer and connecting"
+            "Connecting through resolved endpoint candidates for requested app port"
         );
 
-        // 4. Connect using the peer's assigned IP on the WireGuard network
-        let peer_addr: SocketAddr = format!("{}:{}", assigned_ip, port)
-            .parse()
-            .map_err(|e| ClientError::Transport(format!("invalid peer address: {}", e)))?;
+        let stream = ConnectionBroker::new(self)
+            .connect_to_peer(&intent.target)
+            .await?;
 
-        let stream = self
-            .transport
-            .connection()
-            .connect(peer_addr, peer_public_key)
-            .await
-            .map_err(|e| ClientError::Transport(format!("failed to connect to peer: {}", e)))?;
-
-        debug!(
-            endpoint_id = %endpoint_id,
-            addr = %peer_addr,
-            "Successfully connected to peer"
-        );
-
+        debug!(endpoint_id = %endpoint_id, port = intent.port, "Successfully connected to peer transport for app port");
         Ok(stream)
     }
 
@@ -603,6 +655,37 @@ impl HightowerConnection {
     }
 }
 
+pub(crate) fn parse_public_key_hex(public_key_hex: &str) -> Result<PublicKey25519, ClientError> {
+    let bytes = hex::decode(public_key_hex)
+        .map_err(|e| ClientError::InvalidResponse(format!("invalid public key hex: {}", e)))?;
+
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|e| ClientError::InvalidResponse(format!("invalid public key format: {:?}", e)))
+}
+
+async fn parse_gateway_json_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    operation: &str,
+) -> Result<T, ClientError> {
+    let status = response.status();
+    if status.is_success() {
+        response.json().await.map_err(|e| {
+            ClientError::InvalidResponse(format!("failed to parse {operation} response: {e}"))
+        })
+    } else {
+        let message = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "unknown error".to_string());
+        Err(ClientError::GatewayError {
+            status: status.as_u16(),
+            message: format!("Failed to {operation}: {message}"),
+        })
+    }
+}
+
 fn build_endpoint(gateway_url: &str) -> Result<String, ClientError> {
     let gateway_url = gateway_url.trim();
 
@@ -612,30 +695,34 @@ fn build_endpoint(gateway_url: &str) -> Result<String, ClientError> {
         ));
     }
 
-    Ok(format!(
-        "{}{}",
-        gateway_url.trim_end_matches('/'),
-        API_PATH
-    ))
+    Ok(format!("{}{}", gateway_url.trim_end_matches('/'), API_PATH))
 }
 
 async fn parse_gateway_wireguard_endpoint(gateway_url: &str) -> Result<SocketAddr, ClientError> {
     let parsed_url = url::Url::parse(gateway_url)
         .map_err(|e| ClientError::Configuration(format!("invalid gateway URL: {}", e)))?;
 
-    let host = parsed_url.host_str()
+    let host = parsed_url
+        .host_str()
         .ok_or_else(|| ClientError::Configuration("gateway URL has no host".into()))?;
 
     // Construct WireGuard endpoint using the gateway's host and standard WireGuard port
     let endpoint_str = format!("{}:51820", host);
 
     // Use tokio's DNS resolution to handle both hostnames and IP addresses
-    let mut addrs = tokio::net::lookup_host(&endpoint_str)
-        .await
-        .map_err(|e| ClientError::Configuration(format!("failed to resolve gateway endpoint {}: {}", endpoint_str, e)))?;
+    let mut addrs = tokio::net::lookup_host(&endpoint_str).await.map_err(|e| {
+        ClientError::Configuration(format!(
+            "failed to resolve gateway endpoint {}: {}",
+            endpoint_str, e
+        ))
+    })?;
 
-    addrs.next()
-        .ok_or_else(|| ClientError::Configuration(format!("no addresses found for gateway endpoint: {}", endpoint_str)))
+    addrs.next().ok_or_else(|| {
+        ClientError::Configuration(format!(
+            "no addresses found for gateway endpoint: {}",
+            endpoint_str
+        ))
+    })
 }
 
 async fn register_with_gateway(
@@ -646,10 +733,7 @@ async fn register_with_gateway(
 ) -> Result<RegistrationResponse, ClientError> {
     let payload = RegistrationRequest {
         public_key_hex,
-        public_ip: Some(network_info.public_ip.as_str()),
-        public_port: Some(network_info.public_port),
-        local_ip: Some(network_info.local_ip.as_str()),
-        local_port: Some(network_info.local_port),
+        candidates: network_info.to_candidates(),
     };
 
     let client = reqwest::Client::new();
@@ -714,16 +798,29 @@ mod tests {
         let gateway_url = "http://gateway.example.com:8008";
         let endpoint_id = "ht-festive-penguin-abc123";
         let expected_url = format!("{}/api/endpoints/id/{}", gateway_url, endpoint_id);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123");
+        assert_eq!(
+            expected_url,
+            "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123"
+        );
 
         // Test with IP address
         let ip = "100.64.0.5";
         let expected_url = format!("{}/api/endpoints/ip/{}", gateway_url, ip);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/ip/100.64.0.5");
+        assert_eq!(
+            expected_url,
+            "http://gateway.example.com:8008/api/endpoints/ip/100.64.0.5"
+        );
 
         // Test with trailing slash in gateway URL
         let gateway_url = "http://gateway.example.com:8008/";
-        let expected_url = format!("{}/api/endpoints/id/{}", gateway_url.trim_end_matches('/'), endpoint_id);
-        assert_eq!(expected_url, "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123");
+        let expected_url = format!(
+            "{}/api/endpoints/id/{}",
+            gateway_url.trim_end_matches('/'),
+            endpoint_id
+        );
+        assert_eq!(
+            expected_url,
+            "http://gateway.example.com:8008/api/endpoints/id/ht-festive-penguin-abc123"
+        );
     }
 }

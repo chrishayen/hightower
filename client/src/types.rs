@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::net::SocketAddr;
 
 /// Network information discovered via STUN for NAT traversal
@@ -22,82 +23,108 @@ pub struct NetworkInfo {
     pub local_port: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CandidateKind {
+    Local,
+    StunPublic,
+    HolePunch,
+    Relay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointCandidate {
+    pub kind: CandidateKind,
+    pub addr: SocketAddr,
+    pub priority: u32,
+}
+
+impl NetworkInfo {
+    pub fn to_candidates(&self) -> Vec<EndpointCandidate> {
+        let mut candidates = Vec::new();
+        if let Ok(addr) = format!("{}:{}", self.local_ip, self.local_port).parse() {
+            candidates.push(EndpointCandidate {
+                kind: CandidateKind::Local,
+                addr,
+                priority: 100,
+            });
+        }
+        if let Ok(addr) = format!("{}:{}", self.public_ip, self.public_port).parse() {
+            candidates.push(EndpointCandidate {
+                kind: CandidateKind::StunPublic,
+                addr,
+                priority: 50,
+            });
+        }
+        candidates
+    }
+}
+
 /// Information about a peer in the Hightower network
 ///
-/// Returned by the gateway when querying for peer information. Contains all
-/// the necessary data to establish a WireGuard connection to the peer.
-///
-/// # Field Availability
-/// - `public_key_hex` is always present (required for WireGuard)
-/// - `endpoint_id` and `assigned_ip` are present for registered peers
-/// - `token` is only present when querying your own endpoint info
-/// - Network fields (`public_ip`, `public_port`, etc.) are optional and may
-///   be absent if the peer hasn't reported them or is behind certain NAT types
+/// Returned by the gateway when querying for peer information. Contains the
+/// cryptographic identity and concrete transport candidates required to
+/// establish an app-level encrypted connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
     /// Human-readable endpoint ID (e.g., "ht-festive-penguin-abc123")
-    /// Present for all registered peers, absent only in edge cases
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint_id: Option<String>,
 
-    /// WireGuard public key in hexadecimal format (32 bytes = 64 hex chars)
-    /// This is the peer's cryptographic identity
+    /// WireGuard public key in hexadecimal format (32 bytes = 64 hex chars).
     pub public_key_hex: String,
 
-    /// Registration token for deregistration (only present for own endpoint)
-    /// Keep this secret - anyone with this token can deregister your endpoint
+    /// Registration token for deregistration (only present for own endpoint).
+    /// Keep this secret - anyone with this token can deregister your endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 
-    /// Virtual IP assigned to the peer on the WireGuard network (e.g., "100.64.0.5")
-    /// Use this IP when dialing the peer
+    /// Virtual app-network IP assigned to the peer (e.g., "100.64.0.5").
+    /// This is a logical address, not a socket destination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_ip: Option<String>,
 
-    /// Peer's public IP address as discovered via STUN (for NAT traversal)
-    /// May be None if peer hasn't performed STUN discovery
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub public_ip: Option<String>,
-
-    /// Peer's public port as discovered via STUN (for NAT traversal)
-    /// May be None if peer hasn't performed STUN discovery
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub public_port: Option<u16>,
-
-    /// Peer's local LAN IP address (if reported)
-    /// Can be used for LAN-local connection optimization
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_ip: Option<String>,
-
-    /// Peer's local LAN port (if reported)
-    /// Can be used for LAN-local connection optimization
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_port: Option<u16>,
+    /// Real socket endpoints that can carry the encrypted app-level session.
+    pub candidates: Vec<EndpointCandidate>,
 }
 
 impl PeerInfo {
-    /// Get the public internet endpoint (for NAT traversal)
-    pub fn endpoint(&self) -> Option<SocketAddr> {
-        match (&self.public_ip, self.public_port) {
-            (Some(ip), Some(port)) => {
-                format!("{}:{}", ip, port).parse().ok()
-            }
-            _ => None,
-        }
+    /// Return real transport endpoints ordered by priority.
+    pub fn ordered_candidates(&self) -> Vec<EndpointCandidate> {
+        let mut candidates = self.candidates.clone();
+        candidates.sort_by_key(|candidate| Reverse(candidate.priority));
+        candidates
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionIntentRequest {
+    pub target: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionIntentResponse {
+    pub connection_id: String,
+    pub port: u16,
+    pub initiator: PeerInfo,
+    pub target: PeerInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionIntent {
+    pub connection_id: String,
+    pub initiator_endpoint_id: String,
+    pub target_endpoint_id: String,
+    pub port: u16,
+    pub initiator: PeerInfo,
+    pub target: PeerInfo,
+    pub created_at_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct RegistrationRequest<'a> {
     pub public_key_hex: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub public_ip: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub public_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_ip: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_port: Option<u16>,
+    pub candidates: Vec<EndpointCandidate>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,4 +133,69 @@ pub(crate) struct RegistrationResponse {
     pub token: String,
     pub gateway_public_key_hex: String,
     pub assigned_ip: String,
+}
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_candidate_round_trips_json() {
+        let candidate = EndpointCandidate {
+            kind: CandidateKind::Local,
+            addr: "192.168.4.63:33565".parse().unwrap(),
+            priority: 100,
+        };
+
+        let json = serde_json::to_string(&candidate).unwrap();
+        assert!(json.contains("Local"));
+        assert!(json.contains("192.168.4.63:33565"));
+
+        let decoded: EndpointCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.kind, CandidateKind::Local);
+        assert_eq!(decoded.addr.to_string(), "192.168.4.63:33565");
+        assert_eq!(decoded.priority, 100);
+    }
+
+    #[test]
+    fn network_info_builds_ordered_candidates() {
+        let info = NetworkInfo {
+            public_ip: "71.179.92.242".to_string(),
+            public_port: 50963,
+            local_ip: "192.168.4.63".to_string(),
+            local_port: 33565,
+        };
+
+        let candidates = info.to_candidates();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].kind, CandidateKind::Local);
+        assert_eq!(candidates[0].priority, 100);
+        assert_eq!(candidates[1].kind, CandidateKind::StunPublic);
+        assert_eq!(candidates[1].priority, 50);
+    }
+
+    #[test]
+    fn peer_info_orders_candidates_by_priority() {
+        let peer = PeerInfo {
+            endpoint_id: Some("ht-peer".into()),
+            public_key_hex: "00".repeat(32),
+            token: None,
+            assigned_ip: Some("100.64.0.13".into()),
+            candidates: vec![
+                EndpointCandidate {
+                    kind: CandidateKind::StunPublic,
+                    addr: "71.179.92.242:50963".parse().unwrap(),
+                    priority: 50,
+                },
+                EndpointCandidate {
+                    kind: CandidateKind::Local,
+                    addr: "192.168.4.63:33565".parse().unwrap(),
+                    priority: 100,
+                },
+            ],
+        };
+
+        let ordered = peer.ordered_candidates();
+        assert_eq!(ordered[0].kind, CandidateKind::Local);
+    }
 }

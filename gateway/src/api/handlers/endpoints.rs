@@ -6,13 +6,13 @@ use hex::FromHex;
 use rand::RngCore;
 use tracing::debug;
 
-use crate::context::NamespacedKv;
-use crate::ip_allocator::IpAllocator;
 use super::super::certificates::load_gateway_public_key;
 use super::super::types::{
-    ApiState, EndpointRegistrationRequest, EndpointRegistrationResponse, RootApiError,
-    AUTH_HEADER, ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
+    ApiState, EndpointRegistrationRequest, EndpointRegistrationResponse, RootApiError, AUTH_HEADER,
+    ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
 };
+use crate::context::NamespacedKv;
+use crate::ip_allocator::IpAllocator;
 
 pub(crate) async fn register_endpoint(
     State(state): State<ApiState>,
@@ -52,8 +52,8 @@ pub(crate) async fn register_endpoint(
     // Add endpoint as peer to transport layer
     if let Some(transport) = crate::wireguard_api::get_transport_server() {
         debug!(endpoint_id = %endpoint_id, "gateway: Adding endpoint as WireGuard peer");
-        let peer_public_key = hex::decode(&body.public_key_hex)
-            .map_err(|_| RootApiError::InvalidPublicKey)?;
+        let peer_public_key =
+            hex::decode(&body.public_key_hex).map_err(|_| RootApiError::InvalidPublicKey)?;
         if peer_public_key.len() != 32 {
             return Err(RootApiError::InvalidPublicKey);
         }
@@ -126,7 +126,9 @@ pub(crate) async fn deregister_endpoint(
     }
 
     kv.put_bytes(&registration_key, b"__DELETED__")
-        .map_err(|err| RootApiError::Storage(format!("failed to mark registration deleted: {}", err)))?;
+        .map_err(|err| {
+            RootApiError::Storage(format!("failed to mark registration deleted: {}", err))
+        })?;
 
     kv.put_bytes(&token_key, b"__DELETED__")
         .map_err(|err| RootApiError::Storage(format!("failed to mark token deleted: {}", err)))?;
@@ -230,7 +232,7 @@ async fn disconnect_wireguard_peer(endpoint_id: &str, key_hex: &str) {
     );
 }
 
-fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<(), RootApiError> {
+pub(crate) fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<(), RootApiError> {
     let header_name = HeaderName::from_lowercase(AUTH_HEADER.as_bytes())
         .expect("static header name is valid lowercase");
     let provided = headers
@@ -248,6 +250,51 @@ fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<(), RootApiEr
     }
 }
 
+pub(crate) fn load_registration(
+    kv: &NamespacedKv,
+    endpoint_id: &str,
+) -> Result<EndpointRegistrationRequest, RootApiError> {
+    let registration_key = registration_storage_key(endpoint_id);
+    let data = kv
+        .get_bytes(&registration_key)
+        .map_err(|err| RootApiError::Storage(format!("failed to read endpoint: {}", err)))?
+        .ok_or(RootApiError::NotFound)?;
+
+    if data == b"__DELETED__" {
+        return Err(RootApiError::NotFound);
+    }
+
+    serde_json::from_slice::<EndpointRegistrationRequest>(&data)
+        .map_err(|err| RootApiError::Internal(format!("failed to decode endpoint: {}", err)))
+}
+
+pub(crate) fn resolve_registration_by_id_or_ip(
+    kv: &NamespacedKv,
+    endpoint_id_or_ip: &str,
+) -> Result<EndpointRegistrationRequest, RootApiError> {
+    if endpoint_id_or_ip.parse::<std::net::IpAddr>().is_ok() {
+        let entries = kv
+            .list_by_prefix(ENDPOINT_REGISTRATION_PREFIX.as_bytes())
+            .map_err(|err| RootApiError::Storage(format!("failed to list endpoints: {}", err)))?;
+
+        for (_key, value) in entries {
+            if value == b"__DELETED__" {
+                continue;
+            }
+            let endpoint: EndpointRegistrationRequest =
+                serde_json::from_slice(&value).map_err(|err| {
+                    RootApiError::Internal(format!("failed to decode endpoint: {}", err))
+                })?;
+            if endpoint.assigned_ip.as_deref() == Some(endpoint_id_or_ip) {
+                return Ok(endpoint);
+            }
+        }
+        Err(RootApiError::NotFound)
+    } else {
+        load_registration(kv, endpoint_id_or_ip)
+    }
+}
+
 fn ensure_public_key_valid(public_key_hex: &str) -> Result<(), RootApiError> {
     let bytes = Vec::from_hex(public_key_hex).map_err(|_| RootApiError::InvalidPublicKey)?;
     if bytes.len() == 32 {
@@ -262,7 +309,10 @@ pub(crate) fn persist_registration(
     registration: &EndpointRegistrationRequest,
     token: &str,
 ) -> Result<(), ::kv::Error> {
-    let endpoint_id = registration.endpoint_id.as_ref().expect("endpoint_id must be set before persist");
+    let endpoint_id = registration
+        .endpoint_id
+        .as_ref()
+        .expect("endpoint_id must be set before persist");
     let key = registration_storage_key(endpoint_id);
     let serialized = serde_json::to_vec(registration)
         .expect("EndpointRegistrationRequest serialization should not fail");
@@ -295,9 +345,9 @@ fn generate_endpoint_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
     use crate::api::certificates::persist_certificate;
     use crate::api::handlers::auth_keys::store_legacy_key;
+    use crate::context::{initialize_kv, CommonContext};
     use axum::http::HeaderValue;
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
@@ -328,10 +378,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let response = register_endpoint(State(state), headers, Json(body.clone()))
@@ -379,10 +426,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let response = register_endpoint(State(state), headers, Json(body)).await;
@@ -415,10 +459,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let response = register_endpoint(State(state.clone()), headers, Json(body.clone()))
@@ -471,10 +512,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let response = register_endpoint(State(state.clone()), headers.clone(), Json(body.clone()))
@@ -513,7 +551,8 @@ mod tests {
             HeaderValue::from_static("super-secret"),
         );
 
-        let response = get_endpoint_by_id(State(state), AxumPath("nonexistent".into()), headers).await;
+        let response =
+            get_endpoint_by_id(State(state), AxumPath("nonexistent".into()), headers).await;
         assert!(matches!(response, Err(RootApiError::NotFound)));
     }
 
@@ -543,10 +582,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let response = register_endpoint(State(state.clone()), headers.clone(), Json(body.clone()))
@@ -585,7 +621,8 @@ mod tests {
             HeaderValue::from_static("super-secret"),
         );
 
-        let response = get_endpoint_by_ip(State(state), AxumPath("10.0.0.99".into()), headers).await;
+        let response =
+            get_endpoint_by_ip(State(state), AxumPath("10.0.0.99".into()), headers).await;
         assert!(matches!(response, Err(RootApiError::NotFound)));
     }
 

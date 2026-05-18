@@ -20,9 +20,10 @@ use tracing::dispatcher;
 use tracing::{debug, error};
 
 use handlers::{
-    acme_challenge, change_password, console_dashboard, console_endpoints, console_root, console_settings,
-    create_session, dashboard_endpoints, deregister_endpoint, delete_session, generate_auth_key,
-    get_endpoint_by_id, get_endpoint_by_ip, list_auth_keys, register_endpoint, revoke_auth_key,
+    acme_challenge, change_password, console_dashboard, console_endpoints, console_root,
+    console_settings, create_connection_intent, create_session, dashboard_endpoints,
+    delete_session, deregister_endpoint, generate_auth_key, get_endpoint_by_id, get_endpoint_by_ip,
+    get_pending_connection_intents, list_auth_keys, register_endpoint, revoke_auth_key,
     root_health, store_legacy_key,
 };
 use types::ApiState;
@@ -147,15 +148,25 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         .route("/endpoints", post(register_endpoint))
         .route("/endpoints/id/:endpoint_id", get(get_endpoint_by_id))
         .route("/endpoints/ip/:assigned_ip", get(get_endpoint_by_ip))
-        .route("/endpoints/:token", axum::routing::delete(deregister_endpoint))
+        .route(
+            "/endpoints/:token",
+            axum::routing::delete(deregister_endpoint),
+        )
+        .route(
+            "/connections/intent/:initiator_endpoint_id",
+            post(create_connection_intent),
+        )
+        .route(
+            "/connections/pending/:endpoint_id",
+            get(get_pending_connection_intents),
+        )
         .route("/session", post(create_session))
         .route("/dashboard/endpoints", get(dashboard_endpoints))
         .route("/auth/keys", post(generate_auth_key).get(list_auth_keys))
         .route("/auth/keys/:key_id", axum::routing::delete(revoke_auth_key))
         .route("/settings/password", post(change_password));
 
-    let logout_routes = Router::new()
-        .route("/logout", get(delete_session));
+    let logout_routes = Router::new().route("/logout", get(delete_session));
 
     let console_routes = Router::new()
         .route("/", get(console_root))
@@ -168,8 +179,7 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         Router::new().route("/.well-known/acme-challenge/:token", get(acme_challenge));
 
     // Static file serving (embedded)
-    let static_routes = Router::new()
-        .route("/static/*path", get(static_assets::serve_static));
+    let static_routes = Router::new().route("/static/*path", get(static_assets::serve_static));
 
     Router::new()
         .nest("/api", api_routes)
