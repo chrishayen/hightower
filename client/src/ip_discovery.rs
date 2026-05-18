@@ -1,9 +1,18 @@
-use stun::client::StunClient;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
+use stun::client::StunClient;
 use tracing::{debug, warn};
 
 const DEFAULT_STUN_SERVER: &str = "gateway.shotgun.dev:3478";
+const STUN_SERVER_ENV: &str = "HT_STUN_SERVER";
+
+fn effective_stun_server(explicit: Option<&str>) -> String {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| std::env::var(STUN_SERVER_ENV).ok())
+        .filter(|server| !server.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_STUN_SERVER.to_string())
+}
 
 /// Discovers network information using a bound socket address
 ///
@@ -20,13 +29,13 @@ pub fn discover_with_bound_address(
     local_addr: SocketAddr,
     stun_server: Option<&str>,
 ) -> Result<crate::NetworkInfo, Box<dyn std::error::Error>> {
-    let stun_server = stun_server.unwrap_or(DEFAULT_STUN_SERVER);
+    let stun_server = effective_stun_server(stun_server);
 
     debug!("Discovering network info for bound address: {}", local_addr);
 
     // Use STUN to discover public address
     let client = StunClient::new()?.with_timeout(Duration::from_secs(5));
-    let public_addr = client.get_public_address(stun_server)?;
+    let public_addr = client.get_public_address(&stun_server)?;
 
     debug!(
         public_ip = %public_addr.ip(),
@@ -73,6 +82,35 @@ fn discover_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    #[test]
+    fn env_stun_server_is_used_when_explicit_server_is_absent() {
+        let _guard = env_lock();
+        std::env::set_var("HT_STUN_SERVER", "127.0.0.1:3478");
+
+        assert_eq!(effective_stun_server(None), "127.0.0.1:3478");
+
+        std::env::remove_var("HT_STUN_SERVER");
+    }
+
+    #[test]
+    fn explicit_stun_server_overrides_env_stun_server() {
+        let _guard = env_lock();
+        std::env::set_var("HT_STUN_SERVER", "127.0.0.1:3478");
+
+        assert_eq!(
+            effective_stun_server(Some("example.com:3478")),
+            "example.com:3478"
+        );
+
+        std::env::remove_var("HT_STUN_SERVER");
+    }
 
     #[test]
     fn test_discover_local_ip() {
@@ -82,5 +120,4 @@ mod tests {
         // Should not be unspecified (0.0.0.0)
         assert!(!ip.is_unspecified());
     }
-
 }
