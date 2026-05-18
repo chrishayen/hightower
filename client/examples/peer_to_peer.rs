@@ -5,10 +5,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Enable logging to see what's happening
     tracing_subscriber::fmt::init();
 
-    let auth_token = std::env::var("HT_AUTH_TOKEN")
-        .expect("HT_AUTH_TOKEN environment variable must be set");
-    let gateway_url = std::env::var("HT_GATEWAY_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
+    let auth_token =
+        std::env::var("HT_AUTH_TOKEN").expect("HT_AUTH_TOKEN environment variable must be set");
+    let gateway_url =
+        std::env::var("HT_GATEWAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
     let peer_endpoint = std::env::var("PEER_ENDPOINT")
         .expect("PEER_ENDPOINT environment variable must be set (endpoint ID or IP)");
 
@@ -28,13 +28,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match connection.get_peer_info(&peer_endpoint).await {
         Ok(peer_info) => {
             println!("   ✓ Peer info retrieved:");
-            println!("     Endpoint ID: {}", peer_info.endpoint_id.as_deref().unwrap_or("unknown"));
-            println!("     Assigned IP: {}", peer_info.assigned_ip.as_deref().unwrap_or("unknown"));
+            println!(
+                "     Endpoint ID: {}",
+                peer_info.endpoint_id.as_deref().unwrap_or("unknown")
+            );
+            println!(
+                "     Assigned IP: {}",
+                peer_info.assigned_ip.as_deref().unwrap_or("unknown")
+            );
             println!("     Public Key: {}...", &peer_info.public_key_hex[..16]);
-            if let Some(endpoint) = peer_info.endpoint() {
-                println!("     Public Endpoint: {}", endpoint);
-            } else {
-                println!("     Public Endpoint: None (may be behind NAT)");
+            for candidate in peer_info.ordered_candidates() {
+                println!(
+                    "     Candidate: {:?} {} priority={}",
+                    candidate.kind, candidate.addr, candidate.priority
+                );
             }
         }
         Err(e) => {
@@ -49,8 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Dial the peer (this also fetches peer info internally)
-    println!("\n3. Connecting to peer on port 8080...");
-    match connection.dial(&peer_endpoint, 8080).await {
+    println!("\n3. Connecting to peer...");
+    match connection.dial(&peer_endpoint).await {
         Ok(mut stream) => {
             println!("   ✓ Connected to peer!");
 
@@ -62,10 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Try to receive a response (with timeout)
             println!("\n5. Waiting for response from peer...");
-            match tokio::time::timeout(
-                tokio::time::Duration::from_secs(10),
-                stream.recv()
-            ).await {
+            match tokio::time::timeout(tokio::time::Duration::from_secs(10), stream.recv()).await {
                 Ok(Ok(response)) => {
                     println!("   ✓ Received: {}", String::from_utf8_lossy(&response));
                 }

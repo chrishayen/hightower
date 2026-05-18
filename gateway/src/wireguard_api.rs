@@ -1,8 +1,8 @@
 use crate::certificates::NodeCertificate;
 use crate::context::NamespacedKv;
-use wireguard::connection::{Connection as TransportServer, Stream, Error};
 use std::sync::{Arc, OnceLock, RwLock};
 use tracing::{debug, error};
+use wireguard::connection::{Connection as TransportServer, Error, Stream};
 
 static TRANSPORT_SERVER: OnceLock<TransportServer> = OnceLock::new();
 static GATEWAY_KV: OnceLock<Arc<RwLock<NamespacedKv>>> = OnceLock::new();
@@ -74,7 +74,10 @@ async fn start_api_listener(server: &TransportServer) -> Result<(), Error> {
                         Ok(data) => {
                             let request = String::from_utf8_lossy(&data);
                             let first_line = request.lines().next().unwrap_or("");
-                            debug!(request = first_line, "gateway: Received WireGuard HTTP request");
+                            debug!(
+                                request = first_line,
+                                "gateway: Received WireGuard HTTP request"
+                            );
 
                             if request.contains("GET /ping") {
                                 let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nPong!";
@@ -84,7 +87,8 @@ async fn start_api_listener(server: &TransportServer) -> Result<(), Error> {
                             } else if request.contains("GET /endpoints/") {
                                 handle_endpoint_lookup(&request, &stream).await;
                             } else {
-                                let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                                let response =
+                                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
                                 if let Err(e) = stream.send(response).await {
                                     error!(error = ?e, "Failed to send 404");
                                 }
@@ -142,10 +146,8 @@ async fn handle_endpoint_lookup(request: &str, stream: &Stream) {
             // Looks like an IP - look up endpoint_id from IP allocator
             let ip_allocation_key = format!("ip_allocations/{}", identifier);
             match kv.get_bytes(ip_allocation_key.as_bytes()) {
-                Ok(Some(data)) if data != b"__DELETED__" => {
-                    String::from_utf8(data).ok()
-                }
-                _ => None
+                Ok(Some(data)) if data != b"__DELETED__" => String::from_utf8(data).ok(),
+                _ => None,
             }
         } else {
             // Assume it's an endpoint_id
@@ -160,39 +162,34 @@ async fn handle_endpoint_lookup(request: &str, stream: &Stream) {
         return;
     };
 
-    // Extract data and drop lock before any awaits
     let registration_key = format!("endpoints/registry/{}", endpoint_id);
+
+    // Extract data and drop lock before any awaits
     let endpoint_data = {
         let kv = kv.read().expect("gateway kv lock");
         match kv.get_bytes(registration_key.as_bytes()) {
-            Ok(Some(data)) => {
-                match serde_json::from_slice::<serde_json::Value>(&data) {
-                    Ok(registration) => {
-                        let public_key_hex = registration.get("public_key_hex")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let assigned_ip = registration.get("assigned_ip")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let public_ip = registration.get("public_ip")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let public_port = registration.get("public_port")
-                            .and_then(|v| v.as_u64());
-                        let local_ip = registration.get("local_ip")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let local_port = registration.get("local_port")
-                            .and_then(|v| v.as_u64());
+            Ok(Some(data)) => match serde_json::from_slice::<serde_json::Value>(&data) {
+                Ok(registration) => {
+                    let public_key_hex = registration
+                        .get("public_key_hex")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let assigned_ip = registration
+                        .get("assigned_ip")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let candidates = registration
+                        .get("candidates")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::Array(vec![]));
 
-                        Some((public_key_hex, assigned_ip, public_ip, public_port, local_ip, local_port))
-                    }
-                    Err(e) => {
-                        error!(error = ?e, "gateway: Failed to deserialize registration");
-                        None
-                    }
+                    Some((public_key_hex, assigned_ip, candidates))
                 }
-            }
+                Err(e) => {
+                    error!(error = ?e, "gateway: Failed to deserialize registration");
+                    None
+                }
+            },
             Ok(None) => None,
             Err(e) => {
                 error!(error = ?e, "gateway: Failed to query KV for endpoint");
@@ -203,28 +200,18 @@ async fn handle_endpoint_lookup(request: &str, stream: &Stream) {
 
     // Now send response without holding the lock
     match endpoint_data {
-        Some((Some(public_key_hex), assigned_ip, public_ip, public_port, local_ip, local_port)) => {
-            let mut response_body = format!(r#"{{"endpoint_id":"{}","public_key_hex":"{}""#,
-                endpoint_id, public_key_hex);
+        Some((Some(public_key_hex), assigned_ip, candidates)) => {
+            let mut response_body = serde_json::json!({
+                "endpoint_id": endpoint_id,
+                "public_key_hex": public_key_hex,
+                "candidates": candidates,
+            });
 
             if let Some(ip) = assigned_ip {
-                response_body.push_str(&format!(r#","assigned_ip":"{}""#, ip));
-            }
-            if let Some(ip) = public_ip {
-                response_body.push_str(&format!(r#","public_ip":"{}""#, ip));
-            }
-            if let Some(port) = public_port {
-                response_body.push_str(&format!(r#","public_port":{}"#, port));
-            }
-            if let Some(ip) = local_ip {
-                response_body.push_str(&format!(r#","local_ip":"{}""#, ip));
-            }
-            if let Some(port) = local_port {
-                response_body.push_str(&format!(r#","local_port":{}"#, port));
+                response_body["assigned_ip"] = serde_json::Value::String(ip);
             }
 
-            response_body.push_str("}");
-
+            let response_body = response_body.to_string();
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                 response_body.len(),
@@ -233,7 +220,10 @@ async fn handle_endpoint_lookup(request: &str, stream: &Stream) {
             if let Err(e) = stream.send(response.as_bytes()).await {
                 error!(error = ?e, "gateway: Failed to send endpoint lookup response");
             } else {
-                debug!(endpoint_id = endpoint_id, "gateway: Sent endpoint information");
+                debug!(
+                    endpoint_id = endpoint_id,
+                    "gateway: Sent endpoint information"
+                );
             }
         }
         _ => {

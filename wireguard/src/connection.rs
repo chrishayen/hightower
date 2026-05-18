@@ -113,6 +113,18 @@ impl Connection {
         reply_rx.await.map_err(|_| Error::ActorShutdown)?
     }
 
+    pub async fn send_probe(&self, addr: SocketAddr, payload: &[u8]) -> Result<(), Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        self.send_command(Command::SendProbe {
+            addr,
+            payload: payload.to_vec(),
+            reply: reply_tx,
+        })?;
+
+        reply_rx.await.map_err(|_| Error::ActorShutdown)?
+    }
+
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }

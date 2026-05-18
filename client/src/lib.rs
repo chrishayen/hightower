@@ -1,3 +1,4 @@
+mod broker;
 mod connection;
 mod error;
 mod ip_discovery;
@@ -8,7 +9,10 @@ mod types;
 pub use connection::HightowerConnection;
 pub use error::ClientError;
 pub use transport::TransportServer;
-pub use types::PeerInfo;
+pub use types::{
+    CandidateKind, ConnectionIntent, ConnectionIntentRequest, ConnectionIntentResponse,
+    EndpointCandidate, PeerInfo,
+};
 
 // Internal types
 pub(crate) use types::NetworkInfo;

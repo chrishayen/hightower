@@ -30,7 +30,9 @@ pub async fn run(
             .await
             .context("Failed to connect to Hightower gateway")?
     } else {
-        anyhow::bail!("Authentication token required (use --auth-token or HIGHTOWER_AUTH_TOKEN env var)");
+        anyhow::bail!(
+            "Authentication token required (use --auth-token or HIGHTOWER_AUTH_TOKEN env var)"
+        );
     };
 
     if verbose {
@@ -47,17 +49,26 @@ pub async fn run(
 
     if verbose {
         eprintln!("Found peer:");
-        eprintln!("  Endpoint ID: {}", peer_info.endpoint_id.as_deref().unwrap_or("unknown"));
-        eprintln!("  Assigned IP: {}", peer_info.assigned_ip.as_deref().unwrap_or("unknown"));
+        eprintln!(
+            "  Endpoint ID: {}",
+            peer_info.endpoint_id.as_deref().unwrap_or("unknown")
+        );
+        eprintln!(
+            "  Assigned IP: {}",
+            peer_info.assigned_ip.as_deref().unwrap_or("unknown")
+        );
         eprintln!("  Public Key: {}...", &peer_info.public_key_hex[..16]);
-        if let Some(endpoint) = peer_info.endpoint() {
-            eprintln!("  Public Endpoint: {}", endpoint);
+        for candidate in peer_info.ordered_candidates() {
+            eprintln!(
+                "  Candidate: {:?} {} priority={}",
+                candidate.kind, candidate.addr, candidate.priority
+            );
         }
         eprintln!("\nEstablishing WireGuard connection...");
     }
 
     let mut conn = connection
-        .dial(peer, port)
+        .dial(peer)
         .await
         .context(format!("Failed to dial peer '{}'", peer))?;
 

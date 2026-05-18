@@ -19,6 +19,18 @@ mod connection_tests {
     }
 
     #[tokio::test]
+    async fn test_nat_probe_send_uses_connection_socket() {
+        let (private_key, _public_key) = dh_generate();
+        let conn = Connection::new("127.0.0.1:0".parse().unwrap(), private_key)
+            .await
+            .unwrap();
+
+        conn.send_probe(conn.local_addr(), b"HTPUNCH/1 test")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn test_bidirectional_communication() {
         let (alice_private, alice_public) = dh_generate();
         let (bob_private, bob_public) = dh_generate();

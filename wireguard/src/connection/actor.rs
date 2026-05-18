@@ -89,6 +89,9 @@ impl ConnectionActor {
             Command::AddPeer { peer_public_key, endpoint, persistent_keepalive, reply } => {
                 self.handle_add_peer(peer_public_key, endpoint, persistent_keepalive, reply);
             }
+            Command::SendProbe { addr, payload, reply } => {
+                self.handle_send_probe(addr, payload, reply).await;
+            }
             Command::SendData { stream_id, data, reply } => {
                 self.handle_send_data(stream_id, data, reply).await;
             }
@@ -135,6 +138,11 @@ impl ConnectionActor {
         };
         self.protocol.add_peer(peer_info);
         let _ = reply.send(Ok(()));
+    }
+
+    async fn handle_send_probe(&self, addr: SocketAddr, payload: Vec<u8>, reply: oneshot::Sender<Result<(), Error>>) {
+        let result = self.udp_socket.send_to(&payload, addr).await.map(|_| ()).map_err(Error::Io);
+        let _ = reply.send(result);
     }
 
     async fn handle_send_data(&mut self, stream_id: StreamId, data: Vec<u8>, reply: oneshot::Sender<Result<(), Error>>) {

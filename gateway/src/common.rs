@@ -1,4 +1,3 @@
-
 pub mod context {
     use std::borrow::Cow;
     use std::env::VarError;
@@ -9,9 +8,9 @@ pub mod context {
 
     mod kv {
         use kv::{
-            AuthService, Error as KvError, KvEngine, SingleNodeEngine, StoreConfig,
             command::Command,
             crypto::{AesGcmEncryptor, Argon2SecretHasher},
+            AuthService, Error as KvError, KvEngine, SingleNodeEngine, StoreConfig,
         };
         use rand::RngCore;
         use std::error::Error;
@@ -112,6 +111,16 @@ pub mod context {
 
             pub fn get_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, KvError> {
                 self.engine.get(key)
+            }
+
+            pub fn delete(&self, key: Vec<u8>) -> Result<(), KvError> {
+                let (version, timestamp) = monotonic_version_timestamp();
+                self.engine.submit(Command::Delete {
+                    key,
+                    version,
+                    timestamp,
+                })?;
+                Ok(())
             }
 
             pub fn auth(&self) -> Arc<SharedAuthService> {
@@ -302,8 +311,8 @@ pub mod context {
         }
     }
 
-    pub use kv::{GatewayAuthService, KvHandle, KvInitError, initialize as initialize_kv};
-    pub use token::{TokenError, fetch as fetch_token};
+    pub use kv::{initialize as initialize_kv, GatewayAuthService, KvHandle, KvInitError};
+    pub use token::{fetch as fetch_token, TokenError};
 
     pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
     pub const NODE_CERTIFICATE_KEY: &[u8] = b"certificates/node";
@@ -391,6 +400,11 @@ pub mod context {
         pub fn get_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, ::kv::Error> {
             let key = self.prefixed_key(key);
             self.inner.get_bytes(key.as_ref())
+        }
+
+        pub fn delete(&self, key: &[u8]) -> Result<(), ::kv::Error> {
+            let key = self.prefixed_key(key);
+            self.inner.delete(key.as_ref().to_vec()).map(|_| ())
         }
 
         pub fn auth_service(&self) -> Arc<GatewayAuthService> {
@@ -567,11 +581,15 @@ pub mod context {
         #[test]
         fn initialize_with_token_source_succeeds_without_token() {
             let temp = TempDir::new().expect("tempdir");
-            let context = initialize_with_token_source(Some(temp.path()), |_| Err(VarError::NotPresent))
-                .expect("initialize succeeds without token");
+            let context =
+                initialize_with_token_source(Some(temp.path()), |_| Err(VarError::NotPresent))
+                    .expect("initialize succeeds without token");
 
             let stored = context.kv.get_bytes(HT_AUTH_KEY).expect("kv read");
-            assert!(stored.is_none(), "token should not be stored when not provided");
+            assert!(
+                stored.is_none(),
+                "token should not be stored when not provided"
+            );
         }
 
         #[test]
@@ -596,12 +614,10 @@ pub mod context {
             let context = initialize_with_token(Some(temp.path()), "token".into())
                 .expect("context initialized");
 
-            assert!(
-                context
-                    .auth
-                    .verify_password(DEFAULT_AUTH_USERNAME, DEFAULT_AUTH_PASSWORD)
-                    .expect("default password verification")
-            );
+            assert!(context
+                .auth
+                .verify_password(DEFAULT_AUTH_USERNAME, DEFAULT_AUTH_PASSWORD)
+                .expect("default password verification"));
 
             match previous_user {
                 Some(value) => unsafe { std::env::set_var(DEFAULT_AUTH_USERNAME_ENV, value) },
@@ -618,7 +634,7 @@ pub mod context {
 
 pub mod logging {
     use tracing::subscriber::DefaultGuard;
-    use tracing_subscriber::{EnvFilter, fmt};
+    use tracing_subscriber::{fmt, EnvFilter};
 
     pub fn init() -> DefaultGuard {
         init_with(build_subscriber, tracing::subscriber::set_default)
@@ -680,7 +696,7 @@ pub mod logging {
 }
 
 pub mod fixtures {
-    use crate::context::{CommonContext, initialize_kv};
+    use crate::context::{initialize_kv, CommonContext};
     use tempfile::TempDir;
 
     pub fn context() -> CommonContext {

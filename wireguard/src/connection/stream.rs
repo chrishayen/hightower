@@ -21,6 +21,11 @@ pub(super) enum Command {
         persistent_keepalive: Option<u16>,
         reply: oneshot::Sender<Result<(), Error>>,
     },
+    SendProbe {
+        addr: SocketAddr,
+        payload: Vec<u8>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
     SendData {
         stream_id: StreamId,
         data: Vec<u8>,
