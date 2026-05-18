@@ -1,22 +1,25 @@
-use crate::crypto::{PrivateKey, PublicKey25519};
-use crate::messages::{
-    HandshakeInitiation, HandshakeResponse, TransportData,
-    MESSAGE_HANDSHAKE_INITIATION, MESSAGE_HANDSHAKE_RESPONSE,
-};
-use crate::protocol::{PeerInfo, WireGuardProtocol};
 use super::error::Error;
 use super::logging::*;
 use super::session::{HandshakeReply, PendingHandshake, SessionId, SessionState};
 use super::stream::{Command, Stream, StreamId, StreamState};
 use super::TimeoutConfig;
+use crate::crypto::{PrivateKey, PublicKey25519};
+use crate::messages::{
+    HandshakeInitiation, HandshakeResponse, TransportData, MESSAGE_HANDSHAKE_INITIATION,
+    MESSAGE_HANDSHAKE_RESPONSE,
+};
+use crate::protocol::{PeerInfo, WireGuardProtocol};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use stun::{
+    StunMessage, TransactionId, BINDING_RESPONSE, MAGIC_COOKIE, MAPPED_ADDRESS, XOR_MAPPED_ADDRESS,
+};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::interval;
+use tokio::time::{interval, sleep};
 use tracing::{debug, error, info};
 
 pub(super) struct ConnectionActor {
@@ -27,6 +30,7 @@ pub(super) struct ConnectionActor {
     pending_handshakes: HashMap<u32, PendingHandshake>,
     streams: HashMap<StreamId, StreamState>,
     peer_to_stream: HashMap<PublicKey25519, StreamId>,
+    pending_stun: HashMap<TransactionId, oneshot::Sender<Result<SocketAddr, Error>>>,
     next_stream_id: Arc<AtomicU64>,
     listeners: Vec<mpsc::UnboundedSender<Stream>>,
     handshake_completed: bool,
@@ -34,8 +38,19 @@ pub(super) struct ConnectionActor {
     timeouts: TimeoutConfig,
 }
 
+fn is_stun_message(data: &[u8]) -> bool {
+    data.len() >= 20
+        && data[0] & 0xC0 == 0
+        && u32::from_be_bytes([data[4], data[5], data[6], data[7]]) == MAGIC_COOKIE
+}
+
 impl ConnectionActor {
-    pub fn new(udp_socket: UdpSocket, private_key: PrivateKey, cmd_tx: mpsc::UnboundedSender<Command>, timeouts: TimeoutConfig) -> Self {
+    pub fn new(
+        udp_socket: UdpSocket,
+        private_key: PrivateKey,
+        cmd_tx: mpsc::UnboundedSender<Command>,
+        timeouts: TimeoutConfig,
+    ) -> Self {
         let protocol = WireGuardProtocol::new(Some(private_key));
 
         Self {
@@ -46,6 +61,7 @@ impl ConnectionActor {
             pending_handshakes: HashMap::new(),
             streams: HashMap::new(),
             peer_to_stream: HashMap::new(),
+            pending_stun: HashMap::new(),
             next_stream_id: Arc::new(AtomicU64::new(1)),
             listeners: Vec::new(),
             handshake_completed: false,
@@ -80,31 +96,67 @@ impl ConnectionActor {
 
     async fn handle_command(&mut self, cmd: Command) {
         match cmd {
-            Command::Connect { addr, peer_public_key, reply } => {
+            Command::Connect {
+                addr,
+                peer_public_key,
+                reply,
+            } => {
                 self.handle_connect(addr, peer_public_key, reply).await;
             }
             Command::Listen { reply } => {
                 self.handle_listen(reply);
             }
-            Command::AddPeer { peer_public_key, endpoint, persistent_keepalive, reply } => {
+            Command::AddPeer {
+                peer_public_key,
+                endpoint,
+                persistent_keepalive,
+                reply,
+            } => {
                 self.handle_add_peer(peer_public_key, endpoint, persistent_keepalive, reply);
             }
-            Command::SendProbe { addr, payload, reply } => {
+            Command::SendProbe {
+                addr,
+                payload,
+                reply,
+            } => {
                 self.handle_send_probe(addr, payload, reply).await;
             }
-            Command::SendData { stream_id, data, reply } => {
+            Command::DiscoverPublicAddr {
+                stun_server,
+                timeout,
+                reply,
+            } => {
+                self.handle_discover_public_addr(stun_server, timeout, reply)
+                    .await;
+            }
+            Command::ExpireStunRequest { transaction_id } => {
+                self.handle_expire_stun_request(transaction_id);
+            }
+            Command::SendData {
+                stream_id,
+                data,
+                reply,
+            } => {
                 self.handle_send_data(stream_id, data, reply).await;
             }
             Command::CloseStream { stream_id, reply } => {
                 self.handle_close_stream(stream_id, reply);
             }
-            Command::Disconnect { peer_public_key, reply } => {
+            Command::Disconnect {
+                peer_public_key,
+                reply,
+            } => {
                 self.handle_disconnect(peer_public_key, reply);
             }
         }
     }
 
-    async fn handle_connect(&mut self, addr: SocketAddr, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<Stream, Error>>) {
+    async fn handle_connect(
+        &mut self,
+        addr: SocketAddr,
+        peer_public_key: PublicKey25519,
+        reply: oneshot::Sender<Result<Stream, Error>>,
+    ) {
         debug_init!("Handling connect command to peer {}", addr);
 
         match self.initiate_handshake(addr, peer_public_key).await {
@@ -122,13 +174,22 @@ impl ConnectionActor {
         }
     }
 
-    fn handle_listen(&mut self, reply: oneshot::Sender<Result<mpsc::UnboundedReceiver<Stream>, Error>>) {
+    fn handle_listen(
+        &mut self,
+        reply: oneshot::Sender<Result<mpsc::UnboundedReceiver<Stream>, Error>>,
+    ) {
         let (tx, rx) = mpsc::unbounded_channel();
         self.listeners.push(tx);
         let _ = reply.send(Ok(rx));
     }
 
-    fn handle_add_peer(&mut self, peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>, persistent_keepalive: Option<u16>, reply: oneshot::Sender<Result<(), Error>>) {
+    fn handle_add_peer(
+        &mut self,
+        peer_public_key: PublicKey25519,
+        endpoint: Option<SocketAddr>,
+        persistent_keepalive: Option<u16>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    ) {
         let peer_info = PeerInfo {
             public_key: peer_public_key,
             endpoint,
@@ -140,17 +201,111 @@ impl ConnectionActor {
         let _ = reply.send(Ok(()));
     }
 
-    async fn handle_send_probe(&self, addr: SocketAddr, payload: Vec<u8>, reply: oneshot::Sender<Result<(), Error>>) {
-        let result = self.udp_socket.send_to(&payload, addr).await.map(|_| ()).map_err(Error::Io);
+    async fn handle_send_probe(
+        &self,
+        addr: SocketAddr,
+        payload: Vec<u8>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    ) {
+        let result = self
+            .udp_socket
+            .send_to(&payload, addr)
+            .await
+            .map(|_| ())
+            .map_err(Error::Io);
         let _ = reply.send(result);
     }
 
-    async fn handle_send_data(&mut self, stream_id: StreamId, data: Vec<u8>, reply: oneshot::Sender<Result<(), Error>>) {
+    async fn handle_discover_public_addr(
+        &mut self,
+        stun_server: SocketAddr,
+        timeout: Duration,
+        reply: oneshot::Sender<Result<SocketAddr, Error>>,
+    ) {
+        let request = StunMessage::new_binding_request();
+        let transaction_id = request.transaction_id;
+        let request_bytes = request.encode();
+
+        if let Err(err) = self.udp_socket.send_to(&request_bytes, stun_server).await {
+            let _ = reply.send(Err(Error::Io(err)));
+            return;
+        }
+
+        self.pending_stun.insert(transaction_id, reply);
+
+        let cmd_tx = self.cmd_tx.clone();
+        tokio::spawn(async move {
+            sleep(timeout).await;
+            let _ = cmd_tx.send(Command::ExpireStunRequest { transaction_id });
+        });
+    }
+
+    fn handle_expire_stun_request(&mut self, transaction_id: TransactionId) {
+        if let Some(reply) = self.pending_stun.remove(&transaction_id) {
+            let _ = reply.send(Err(Error::ProtocolError(
+                "timed out waiting for STUN binding response".to_string(),
+            )));
+        }
+    }
+
+    fn handle_stun_response(&mut self, data: &[u8], from: SocketAddr) {
+        let response = match StunMessage::decode(data) {
+            Ok(response) => response,
+            Err(err) => {
+                debug!(from = %from, error = %err, "Ignoring invalid STUN packet");
+                return;
+            }
+        };
+
+        if response.message_type != BINDING_RESPONSE {
+            debug!(from = %from, message_type = response.message_type, "Ignoring non-binding STUN packet");
+            return;
+        }
+
+        let Some(reply) = self.pending_stun.remove(&response.transaction_id) else {
+            debug!(from = %from, "No pending STUN request for response");
+            return;
+        };
+
+        let mut mapped_addr = None;
+        for attr in &response.attributes {
+            if attr.attr_type == XOR_MAPPED_ADDRESS {
+                mapped_addr = Some(attr.decode_xor_mapped_address(&response.transaction_id));
+                break;
+            }
+            if attr.attr_type == MAPPED_ADDRESS {
+                mapped_addr = Some(attr.decode_mapped_address());
+            }
+        }
+
+        let result = match mapped_addr {
+            Some(Ok(addr)) => Ok(addr),
+            Some(Err(err)) => Err(Error::ProtocolError(format!(
+                "invalid STUN mapped address: {err}"
+            ))),
+            None => Err(Error::ProtocolError(
+                "STUN response did not contain a mapped address".to_string(),
+            )),
+        };
+
+        let _ = reply.send(result);
+    }
+
+    async fn handle_send_data(
+        &mut self,
+        stream_id: StreamId,
+        data: Vec<u8>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    ) {
         let result = self.send_data(stream_id, data).await;
         let _ = reply.send(result);
     }
 
-    fn handle_close_stream(&mut self, stream_id: StreamId, reply: oneshot::Sender<Result<(), Error>>) {
+    fn handle_close_stream(
+        &mut self,
+        stream_id: StreamId,
+        reply: oneshot::Sender<Result<(), Error>>,
+    ) {
         let stream = match self.streams.get(&stream_id) {
             Some(s) => s,
             None => {
@@ -164,7 +319,11 @@ impl ConnectionActor {
         let _ = reply.send(Ok(()));
     }
 
-    fn handle_disconnect(&mut self, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<(), Error>>) {
+    fn handle_disconnect(
+        &mut self,
+        peer_public_key: PublicKey25519,
+        reply: oneshot::Sender<Result<(), Error>>,
+    ) {
         self.disconnect_peer(&peer_public_key);
         let _ = reply.send(Ok(()));
     }
@@ -186,6 +345,11 @@ impl ConnectionActor {
 
     async fn handle_packet(&mut self, data: &[u8], from: SocketAddr) {
         if data.is_empty() {
+            return;
+        }
+
+        if is_stun_message(data) {
+            self.handle_stun_response(data, from);
             return;
         }
 
@@ -216,12 +380,20 @@ impl ConnectionActor {
             }
         };
 
-        debug_resp!("Received handshake initiation from {}, sender={}", from, initiation.sender);
+        debug_resp!(
+            "Received handshake initiation from {}, sender={}",
+            from,
+            initiation.sender
+        );
 
         let response = match self.protocol.process_initiation(&initiation) {
             Ok(resp) => resp,
             Err(e) => {
-                error_resp!("Failed to process handshake initiation from {}: {:?}", from, e);
+                error_resp!(
+                    "Failed to process handshake initiation from {}: {:?}",
+                    from,
+                    e
+                );
                 return;
             }
         };
@@ -242,7 +414,10 @@ impl ConnectionActor {
         debug_resp!("Sent handshake response to {}", from);
 
         if !self.create_session_from_response(response.sender, peer_public_key, from, false) {
-            error_resp!("Failed to create session (possible ID collision) for {}", from);
+            error_resp!(
+                "Failed to create session (possible ID collision) for {}",
+                from
+            );
             return;
         }
 
@@ -253,15 +428,26 @@ impl ConnectionActor {
         self.enable_maintenance_if_first();
     }
 
-    async fn send_handshake_response(&self, response: &HandshakeResponse, to: SocketAddr) -> Result<(), Error> {
-        let response_bytes = response.to_bytes()
+    async fn send_handshake_response(
+        &self,
+        response: &HandshakeResponse,
+        to: SocketAddr,
+    ) -> Result<(), Error> {
+        let response_bytes = response
+            .to_bytes()
             .map_err(|e| Error::ProtocolError(format!("Failed to serialize: {}", e)))?;
 
         self.udp_socket.send_to(&response_bytes, to).await?;
         Ok(())
     }
 
-    fn create_session_from_response(&mut self, session_id: u32, peer_public_key: PublicKey25519, from: SocketAddr, is_initiator: bool) -> bool {
+    fn create_session_from_response(
+        &mut self,
+        session_id: u32,
+        peer_public_key: PublicKey25519,
+        from: SocketAddr,
+        is_initiator: bool,
+    ) -> bool {
         let session = match self.protocol.get_session(session_id) {
             Some(s) => s.clone(),
             None => return false,
@@ -270,17 +456,23 @@ impl ConnectionActor {
         let sid = SessionId(session_id);
 
         if self.sessions.contains_key(&sid) {
-            error_session!(is_initiator,
+            error_session!(
+                is_initiator,
                 "Session ID collision detected! Rejecting new session: session_id={}, peer={}",
-                session_id, hex::encode(&peer_public_key[..8]));
+                session_id,
+                hex::encode(&peer_public_key[..8])
+            );
             return false;
         }
 
         if let Some(old_session_id) = self.peer_to_session.get(&peer_public_key) {
             if *old_session_id != sid {
-                debug_session!(is_initiator,
+                debug_session!(
+                    is_initiator,
                     "Replacing old session for peer: old_session_id={}, new_session_id={}",
-                    old_session_id.0, session_id);
+                    old_session_id.0,
+                    session_id
+                );
                 self.sessions.remove(old_session_id);
             }
         }
@@ -305,19 +497,30 @@ impl ConnectionActor {
             }
         };
 
-        debug_init!("Received handshake response from {}, sender={}, receiver={}",
-            from, response.sender, response.receiver);
+        debug_init!(
+            "Received handshake response from {}, sender={}, receiver={}",
+            from,
+            response.sender,
+            response.receiver
+        );
 
         let pending = match self.pending_handshakes.remove(&response.receiver) {
             Some(p) => p,
             None => {
-                debug!("No pending handshake for receiver {} from {}", response.receiver, from);
+                debug!(
+                    "No pending handshake for receiver {} from {}",
+                    response.receiver, from
+                );
                 return;
             }
         };
 
         if let Err(e) = self.protocol.process_response(&response) {
-            error_init!("Failed to process handshake response from {}: {:?}", from, e);
+            error_init!(
+                "Failed to process handshake response from {}: {:?}",
+                from,
+                e
+            );
             if let HandshakeReply::Connect(reply) = pending.reply {
                 let _ = reply.send(Err(Error::HandshakeFailed(e.to_string())));
             }
@@ -329,14 +532,23 @@ impl ConnectionActor {
                 self.handle_connect_reply(&response, from, pending.peer_public_key, reply);
             }
             HandshakeReply::Rekey(old_session_id) => {
-                self.handle_rekey_reply(&response, from, old_session_id, pending.peer_public_key).await;
+                self.handle_rekey_reply(&response, from, old_session_id, pending.peer_public_key)
+                    .await;
             }
         }
     }
 
-    fn handle_connect_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, peer_public_key: PublicKey25519, reply: oneshot::Sender<Result<Stream, Error>>) {
+    fn handle_connect_reply(
+        &mut self,
+        response: &HandshakeResponse,
+        from: SocketAddr,
+        peer_public_key: PublicKey25519,
+        reply: oneshot::Sender<Result<Stream, Error>>,
+    ) {
         if !self.create_session_from_response(response.sender, peer_public_key, from, true) {
-            let _ = reply.send(Err(Error::HandshakeFailed("Session ID collision".to_string())));
+            let _ = reply.send(Err(Error::HandshakeFailed(
+                "Session ID collision".to_string(),
+            )));
             return;
         }
 
@@ -346,9 +558,18 @@ impl ConnectionActor {
         self.enable_maintenance_if_first();
     }
 
-    async fn handle_rekey_reply(&mut self, response: &HandshakeResponse, from: SocketAddr, old_session_id: SessionId, peer_public_key: PublicKey25519) {
-        info_init!("Rekey completed: old_session_id={}, new_session_id={}",
-            old_session_id.0, response.sender);
+    async fn handle_rekey_reply(
+        &mut self,
+        response: &HandshakeResponse,
+        from: SocketAddr,
+        old_session_id: SessionId,
+        peer_public_key: PublicKey25519,
+    ) {
+        info_init!(
+            "Rekey completed: old_session_id={}, new_session_id={}",
+            old_session_id.0,
+            response.sender
+        );
 
         let queued_packets = match self.sessions.get_mut(&old_session_id) {
             Some(old_session) => {
@@ -420,7 +641,10 @@ impl ConnectionActor {
                 }
             };
 
-            let should_queue = matches!(session_state.state, super::session::SessionStateInner::Rekeying { .. });
+            let should_queue = matches!(
+                session_state.state,
+                super::session::SessionStateInner::Rekeying { .. }
+            );
             let peer_public_key = session_state.peer_public_key;
 
             (peer_public_key, plaintext, should_queue)
@@ -439,9 +663,17 @@ impl ConnectionActor {
 
         if plaintext.is_empty() {
             if let Some(session_state) = self.sessions.get(&session_id) {
-                debug_session!(session_state.is_initiator, "Received keepalive response from {}, session_id={}", from, session_id.0);
+                debug_session!(
+                    session_state.is_initiator,
+                    "Received keepalive response from {}, session_id={}",
+                    from,
+                    session_id.0
+                );
             } else {
-                debug!("Received keepalive from {} (session already removed), session_id={}", from, session_id.0);
+                debug!(
+                    "Received keepalive from {} (session already removed), session_id={}",
+                    from, session_id.0
+                );
             }
             return;
         }
@@ -471,20 +703,31 @@ impl ConnectionActor {
         }
     }
 
-    async fn initiate_handshake(&mut self, addr: SocketAddr, peer_public_key: PublicKey25519) -> Result<u32, Error> {
+    async fn initiate_handshake(
+        &mut self,
+        addr: SocketAddr,
+        peer_public_key: PublicKey25519,
+    ) -> Result<u32, Error> {
         self.ensure_peer_exists(peer_public_key, addr);
 
-        let handshake = self.protocol.initiate_handshake(&peer_public_key)
+        let handshake = self
+            .protocol
+            .initiate_handshake(&peer_public_key)
             .map_err(|e| Error::HandshakeFailed(e.to_string()))?;
 
         let handshake_id = handshake.sender;
 
-        let handshake_bytes = handshake.to_bytes()
+        let handshake_bytes = handshake
+            .to_bytes()
             .map_err(|e| Error::ProtocolError(format!("Serialize failed: {}", e)))?;
 
         self.udp_socket.send_to(&handshake_bytes, addr).await?;
 
-        debug_init!("Sent handshake initiation to {}, handshake_id={}", addr, handshake_id);
+        debug_init!(
+            "Sent handshake initiation to {}, handshake_id={}",
+            addr,
+            handshake_id
+        );
 
         Ok(handshake_id)
     }
@@ -505,31 +748,37 @@ impl ConnectionActor {
     }
 
     async fn send_data(&mut self, stream_id: StreamId, data: Vec<u8>) -> Result<(), Error> {
-        let stream = self.streams.get(&stream_id)
+        let stream = self
+            .streams
+            .get(&stream_id)
             .ok_or(Error::ConnectionClosed)?;
 
         let peer_public_key = stream.peer_public_key;
 
-        let session_id = *self.peer_to_session.get(&peer_public_key)
+        let session_id = *self
+            .peer_to_session
+            .get(&peer_public_key)
             .ok_or(Error::NoSession)?;
 
-        let session_state = self.sessions.get_mut(&session_id)
-            .ok_or(Error::NoSession)?;
+        let session_state = self.sessions.get_mut(&session_id).ok_or(Error::NoSession)?;
 
-        if matches!(session_state.state, super::session::SessionStateInner::Rekeying { .. }) {
+        if matches!(
+            session_state.state,
+            super::session::SessionStateInner::Rekeying { .. }
+        ) {
             session_state.queue_packet(data)?;
             return Ok(());
         }
 
-        let session = session_state.get_active_session()
-            .ok_or(Error::NoSession)?;
+        let session = session_state.get_active_session().ok_or(Error::NoSession)?;
 
         let encrypted = crate::crypto::aead_encrypt(
             &session.keys.send_key,
             session_state.send_counter,
             &data,
             &[],
-        ).map_err(|_| Error::EncryptionFailed)?;
+        )
+        .map_err(|_| Error::EncryptionFailed)?;
 
         let counter = session_state.send_counter;
         session_state.send_counter += 1;
@@ -537,16 +786,24 @@ impl ConnectionActor {
 
         let endpoint = session_state.endpoint.ok_or(Error::NoEndpoint)?;
 
-        self.send_transport(session_id.0, counter, encrypted, endpoint).await
+        self.send_transport(session_id.0, counter, encrypted, endpoint)
+            .await
     }
 
-    async fn send_transport(&self, session_id: u32, counter: u64, encrypted: Vec<u8>, to: SocketAddr) -> Result<(), Error> {
+    async fn send_transport(
+        &self,
+        session_id: u32,
+        counter: u64,
+        encrypted: Vec<u8>,
+        to: SocketAddr,
+    ) -> Result<(), Error> {
         let mut transport = TransportData::new();
         transport.receiver = session_id;
         transport.counter = counter;
         transport.packet = encrypted;
 
-        let transport_bytes = transport.to_bytes()
+        let transport_bytes = transport
+            .to_bytes()
             .map_err(|e| Error::ProtocolError(format!("Serialize failed: {}", e)))?;
 
         self.udp_socket.send_to(&transport_bytes, to).await?;
@@ -558,14 +815,23 @@ impl ConnectionActor {
 
         let (recv_tx, recv_rx) = mpsc::unbounded_channel();
 
-        self.streams.insert(stream_id, StreamState {
-            peer_public_key,
-            recv_tx,
-        });
+        self.streams.insert(
+            stream_id,
+            StreamState {
+                peer_public_key,
+                recv_tx,
+            },
+        );
 
         self.peer_to_stream.insert(peer_public_key, stream_id);
 
-        Stream::new(stream_id, peer_public_key, peer_addr, self.cmd_tx.clone(), recv_rx)
+        Stream::new(
+            stream_id,
+            peer_public_key,
+            peer_addr,
+            self.cmd_tx.clone(),
+            recv_rx,
+        )
     }
 
     fn create_incoming_stream(&mut self, peer_public_key: PublicKey25519, peer_addr: SocketAddr) {
@@ -626,19 +892,38 @@ impl ConnectionActor {
             session_state.last_send = Instant::now();
 
             if let Some(endpoint) = session_state.endpoint {
-                keepalives.push((session_id.0, counter, encrypted, endpoint, session_state.is_initiator));
+                keepalives.push((
+                    session_id.0,
+                    counter,
+                    encrypted,
+                    endpoint,
+                    session_state.is_initiator,
+                ));
             }
         }
 
         for (session_id, counter, encrypted, endpoint, is_initiator) in keepalives {
-            if let Err(e) = self.send_transport(session_id, counter, encrypted, endpoint).await {
-                error_session!(is_initiator, "Failed to send keepalive to {}, session_id={}: {:?}", endpoint, session_id, e);
+            if let Err(e) = self
+                .send_transport(session_id, counter, encrypted, endpoint)
+                .await
+            {
+                error_session!(
+                    is_initiator,
+                    "Failed to send keepalive to {}, session_id={}: {:?}",
+                    endpoint,
+                    session_id,
+                    e
+                );
             } else {
-                debug_session!(is_initiator, "Sent keepalive to {}, session_id={}", endpoint, session_id);
+                debug_session!(
+                    is_initiator,
+                    "Sent keepalive to {}, session_id={}",
+                    endpoint,
+                    session_id
+                );
             }
         }
     }
-
 
     async fn initiate_rekeys(&mut self, now: Instant) {
         let mut rekeys = Vec::new();
@@ -658,13 +943,22 @@ impl ConnectionActor {
         }
 
         for (old_session_id, peer_public_key, endpoint) in rekeys {
-            self.initiate_single_rekey(old_session_id, peer_public_key, endpoint).await;
+            self.initiate_single_rekey(old_session_id, peer_public_key, endpoint)
+                .await;
         }
     }
 
-    async fn initiate_single_rekey(&mut self, old_session_id: SessionId, peer_public_key: PublicKey25519, endpoint: SocketAddr) {
-        info_init!("Initiating rekey for session_id={}, peer={}",
-            old_session_id.0, hex::encode(&peer_public_key[..8]));
+    async fn initiate_single_rekey(
+        &mut self,
+        old_session_id: SessionId,
+        peer_public_key: PublicKey25519,
+        endpoint: SocketAddr,
+    ) {
+        info_init!(
+            "Initiating rekey for session_id={}, peer={}",
+            old_session_id.0,
+            hex::encode(&peer_public_key[..8])
+        );
 
         let handshake_id = match self.initiate_handshake(endpoint, peer_public_key).await {
             Ok(id) => id,
@@ -684,11 +978,14 @@ impl ConnectionActor {
             return;
         }
 
-        self.pending_handshakes.insert(handshake_id, PendingHandshake {
-            peer_public_key,
-            reply: HandshakeReply::Rekey(old_session_id),
-            created_at: Instant::now(),
-        });
+        self.pending_handshakes.insert(
+            handshake_id,
+            PendingHandshake {
+                peer_public_key,
+                reply: HandshakeReply::Rekey(old_session_id),
+                created_at: Instant::now(),
+            },
+        );
     }
 
     fn cleanup_stale_connections(&mut self, now: Instant) {

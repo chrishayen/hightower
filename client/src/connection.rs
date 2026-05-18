@@ -230,8 +230,28 @@ impl HightowerConnection {
         // This information is sent to the gateway so peers can reach us directly.
         let local_addr = connection.local_addr();
 
-        let network_info = crate::ip_discovery::discover_with_bound_address(local_addr, None)
-            .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
+        let network_info = {
+            let stun_server = crate::ip_discovery::default_stun_server(None);
+            let stun_addr = tokio::net::lookup_host(&stun_server)
+                .await
+                .map_err(|e| {
+                    ClientError::NetworkDiscovery(format!(
+                        "failed to resolve STUN server {stun_server}: {e}"
+                    ))
+                })?
+                .next()
+                .ok_or_else(|| {
+                    ClientError::NetworkDiscovery(format!(
+                        "no addresses resolved for STUN server {stun_server}"
+                    ))
+                })?;
+            let public_addr = connection
+                .discover_public_addr(stun_addr, Duration::from_secs(5))
+                .await
+                .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
+            crate::ip_discovery::network_info_from_addresses(local_addr, public_addr)
+                .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?
+        };
 
         debug!(
             public_ip = %network_info.public_ip,

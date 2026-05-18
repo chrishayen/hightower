@@ -7,10 +7,10 @@ mod stream;
 use crate::crypto::{PrivateKey, PublicKey25519};
 use actor::ConnectionActor;
 pub use error::Error;
-pub use stream::Stream;
-use stream::Command;
 use std::net::SocketAddr;
 use std::time::Duration;
+use stream::Command;
+pub use stream::Stream;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
@@ -60,7 +60,11 @@ impl Connection {
         Ok(Self { cmd_tx, local_addr })
     }
 
-    pub async fn connect(&self, addr: SocketAddr, peer_public_key: PublicKey25519) -> Result<Stream, Error> {
+    pub async fn connect(
+        &self,
+        addr: SocketAddr,
+        peer_public_key: PublicKey25519,
+    ) -> Result<Stream, Error> {
         let (reply_tx, reply_rx) = oneshot::channel();
 
         self.send_command(Command::Connect {
@@ -80,8 +84,13 @@ impl Connection {
         reply_rx.await.map_err(|_| Error::ActorShutdown)?
     }
 
-    pub async fn add_peer(&self, peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>) -> Result<(), Error> {
-        self.add_peer_with_keepalive(peer_public_key, endpoint, None).await
+    pub async fn add_peer(
+        &self,
+        peer_public_key: PublicKey25519,
+        endpoint: Option<SocketAddr>,
+    ) -> Result<(), Error> {
+        self.add_peer_with_keepalive(peer_public_key, endpoint, None)
+            .await
     }
 
     pub async fn add_peer_with_keepalive(
@@ -119,6 +128,22 @@ impl Connection {
         self.send_command(Command::SendProbe {
             addr,
             payload: payload.to_vec(),
+            reply: reply_tx,
+        })?;
+
+        reply_rx.await.map_err(|_| Error::ActorShutdown)?
+    }
+
+    pub async fn discover_public_addr(
+        &self,
+        stun_server: SocketAddr,
+        timeout: Duration,
+    ) -> Result<SocketAddr, Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        self.send_command(Command::DiscoverPublicAddr {
+            stun_server,
+            timeout,
             reply: reply_tx,
         })?;
 
