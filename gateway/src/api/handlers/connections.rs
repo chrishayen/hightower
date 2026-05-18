@@ -33,6 +33,7 @@ pub(crate) async fn create_connection_intent(
         connection_id: connection_id.clone(),
         initiator_endpoint_id,
         target_endpoint_id: target_endpoint_id.clone(),
+        port: body.port,
         initiator: initiator.clone(),
         target: target.clone(),
         created_at_ms: current_time_ms(),
@@ -50,6 +51,7 @@ pub(crate) async fn create_connection_intent(
 
     Ok(Json(ConnectionIntentResponse {
         connection_id,
+        port: body.port,
         initiator,
         target,
     }))
@@ -223,6 +225,7 @@ mod tests {
             headers.clone(),
             Json(ConnectionIntentRequest {
                 target: target.endpoint_id.clone(),
+                port: 8080,
             }),
         )
         .await
@@ -237,6 +240,7 @@ mod tests {
             response.target.endpoint_id.as_deref(),
             Some(target.endpoint_id.as_str())
         );
+        assert_eq!(response.port, 8080);
 
         let pending = get_pending_connection_intents(
             State(state.clone()),
@@ -251,6 +255,7 @@ mod tests {
         assert_eq!(pending[0].connection_id, response.connection_id);
         assert_eq!(pending[0].initiator_endpoint_id, initiator.endpoint_id);
         assert_eq!(pending[0].target_endpoint_id, target.endpoint_id);
+        assert_eq!(pending[0].port, 8080);
 
         let pending_again = get_pending_connection_intents(
             State(state),

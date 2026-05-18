@@ -17,7 +17,7 @@ Manual frank -> shotgun probing proved:
 - Registration works when `HT_STUN_SERVER=5.78.219.236:3478` is set.
 - Peer lookup returns public key, assigned IP, public STUN endpoint, and local endpoint.
 - Direct LAN endpoint handshake works when both sides pre-authorize each other.
-- Current `HightowerConnection::dial(peer)` must not dial an assigned virtual IP directly; virtual IPs are logical addresses, not OS routes.
+- Current `HightowerConnection::dial(peer, port)` must not dial an assigned virtual IP directly; virtual IPs are logical addresses, not OS routes.
 - Responder rejects unknown initiators with `ProtocolError("Unknown peer")` unless the peer public key is pre-added.
 
 Therefore the fix is not to make `100.64.x.x` routable at kernel level. The fix is an app-level virtual network layer:

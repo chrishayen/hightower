@@ -99,11 +99,13 @@ impl PeerInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionIntentRequest {
     pub target: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionIntentResponse {
     pub connection_id: String,
+    pub port: u16,
     pub initiator: PeerInfo,
     pub target: PeerInfo,
 }
@@ -113,6 +115,7 @@ pub struct ConnectionIntent {
     pub connection_id: String,
     pub initiator_endpoint_id: String,
     pub target_endpoint_id: String,
+    pub port: u16,
     pub initiator: PeerInfo,
     pub target: PeerInfo,
     pub created_at_ms: u64,

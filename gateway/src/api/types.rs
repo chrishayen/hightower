@@ -49,6 +49,7 @@ pub(crate) struct EndpointRegistrationRequest {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConnectionIntentRequest {
     pub(crate) target: String,
+    pub(crate) port: u16,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -56,6 +57,7 @@ pub(crate) struct ConnectionIntent {
     pub(crate) connection_id: String,
     pub(crate) initiator_endpoint_id: String,
     pub(crate) target_endpoint_id: String,
+    pub(crate) port: u16,
     pub(crate) initiator: EndpointRegistrationRequest,
     pub(crate) target: EndpointRegistrationRequest,
     pub(crate) created_at_ms: u64,
@@ -64,6 +66,7 @@ pub(crate) struct ConnectionIntent {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConnectionIntentResponse {
     pub(crate) connection_id: String,
+    pub(crate) port: u16,
     pub(crate) initiator: EndpointRegistrationRequest,
     pub(crate) target: EndpointRegistrationRequest,
 }
@@ -186,9 +189,11 @@ mod type_tests {
     fn connection_intent_round_trips_json() {
         let request = ConnectionIntentRequest {
             target: "ht-unlimited-machine-6327".to_string(),
+            port: 8080,
         };
         let json = serde_json::to_string(&request).unwrap();
         let decoded: ConnectionIntentRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.target, "ht-unlimited-machine-6327");
+        assert_eq!(decoded.port, 8080);
     }
 }

@@ -542,7 +542,7 @@ impl HightowerConnection {
     /// # Example
     /// ```no_run
     /// # async fn example(conn: &hightower_client::HightowerConnection) -> Result<(), Box<dyn std::error::Error>> {
-    /// let connection = conn.dial("ht-festive-penguin-abc123").await?;
+    /// let connection = conn.dial("ht-festive-penguin-abc123", 8080).await?;
     /// connection.send(b"Hello, peer!").await?;
     /// # Ok(())
     /// # }
@@ -550,6 +550,7 @@ impl HightowerConnection {
     pub async fn create_connection_intent(
         &self,
         target: &str,
+        port: u16,
     ) -> Result<ConnectionIntentResponse, ClientError> {
         let url = format!(
             "{}/api/connections/intent/{}",
@@ -562,6 +563,7 @@ impl HightowerConnection {
             .header("X-HT-Auth", &self.auth_token)
             .json(&ConnectionIntentRequest {
                 target: target.to_string(),
+                port,
             })
             .send()
             .await?;
@@ -618,21 +620,26 @@ impl HightowerConnection {
         Ok(synced)
     }
 
-    pub async fn dial(&self, peer: &str) -> Result<wireguard::connection::Stream, ClientError> {
-        let intent = self.create_connection_intent(peer).await?;
+    pub async fn dial(
+        &self,
+        peer: &str,
+        port: u16,
+    ) -> Result<wireguard::connection::Stream, ClientError> {
+        let intent = self.create_connection_intent(peer, port).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
         let endpoint_id = intent.target.endpoint_id.as_deref().unwrap_or(peer);
 
         debug!(
             endpoint_id = %endpoint_id,
-            "Connecting through resolved endpoint candidates"
+            port = port,
+            "Connecting through resolved endpoint candidates for requested app port"
         );
 
         let stream = ConnectionBroker::new(self)
             .connect_to_peer(&intent.target, &intent.connection_id)
             .await?;
 
-        debug!(endpoint_id = %endpoint_id, "Successfully connected to peer transport");
+        debug!(endpoint_id = %endpoint_id, port = intent.port, "Successfully connected to peer transport for app port");
         Ok(stream)
     }
 

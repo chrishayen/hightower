@@ -68,7 +68,7 @@ async fn dial(
     println!("E2E_ENDPOINT={}", connection.endpoint_id());
     println!("E2E_ASSIGNED_IP={}", connection.assigned_ip());
 
-    let mut stream = timeout(Duration::from_secs(30), connection.dial(peer)).await??;
+    let mut stream = timeout(Duration::from_secs(30), connection.dial(peer, 8080)).await??;
     println!("E2E_DIALED=1");
     stream.send(b"ping-from-initiator").await?;
     println!("E2E_SENT=ping-from-initiator");

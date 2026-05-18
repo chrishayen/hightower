@@ -68,7 +68,7 @@ pub async fn run(
     }
 
     let mut conn = connection
-        .dial(peer)
+        .dial(peer, port)
         .await
         .context(format!("Failed to dial peer '{}'", peer))?;
 
