@@ -2,20 +2,23 @@ use askama::Template;
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     http::header::CONTENT_TYPE,
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use tracing::error;
 
-use crate::context::NamespacedKv;
 use super::super::types::{
-    ApiState, EndpointRegistrationRequest, EndpointsTableTemplate,
-    ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
+    ApiState, EndpointRegistrationRequest, EndpointsTableTemplate, ENDPOINT_REGISTRATION_PREFIX,
+    ENDPOINT_TOKEN_PREFIX,
 };
 use super::sessions::has_valid_session;
+use crate::context::NamespacedKv;
 
-pub(crate) async fn dashboard_endpoints(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn dashboard_endpoints(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match fetch_registered_endpoints(&state) {
             Ok(endpoints) => match render_endpoints_partial(&endpoints) {
@@ -45,7 +48,11 @@ pub(crate) async fn dashboard_endpoints(State(state): State<ApiState>, headers: 
             },
             Err(err) => {
                 error!(?err, "Failed to fetch endpoint registrations");
-                (StatusCode::INTERNAL_SERVER_ERROR, "failed to load endpoints").into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to load endpoints",
+                )
+                    .into_response()
             }
         },
         Ok(false) => unauthorized_redirect(),
@@ -60,7 +67,9 @@ pub(crate) async fn dashboard_endpoints(State(state): State<ApiState>, headers: 
     }
 }
 
-fn render_endpoints_partial(endpoints: &[EndpointRegistrationRequest]) -> Result<String, askama::Error> {
+fn render_endpoints_partial(
+    endpoints: &[EndpointRegistrationRequest],
+) -> Result<String, askama::Error> {
     let template = EndpointsTableTemplate { endpoints };
     template.render()
 }
@@ -86,7 +95,9 @@ fn unauthorized_redirect() -> Response {
     }
 }
 
-fn fetch_registered_endpoints(state: &ApiState) -> Result<Vec<EndpointRegistrationRequest>, String> {
+fn fetch_registered_endpoints(
+    state: &ApiState,
+) -> Result<Vec<EndpointRegistrationRequest>, String> {
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
@@ -136,10 +147,10 @@ fn find_token_for_endpoint(kv: &NamespacedKv, endpoint_id: &str) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
     use crate::api::handlers::endpoints::persist_registration;
     use crate::api::handlers::sessions::create_session;
     use crate::api::types::{SessionRequest, SESSION_COOKIE};
+    use crate::context::{initialize_kv, CommonContext};
     use axum::{
         extract::Json,
         http::header::{COOKIE, SET_COOKIE},
@@ -170,10 +181,7 @@ mod tests {
                 .into(),
             token: None,
             assigned_ip: None,
-            public_ip: None,
-            public_port: None,
-            local_ip: None,
-            local_port: None,
+            candidates: vec![],
         };
 
         let kv = {

@@ -1,9 +1,10 @@
-use crate::context::{CommonContext, HT_AUTH_KEY, NamespacedKv};
-use reqwest::StatusCode as HttpStatusCode;
+use crate::context::{CommonContext, NamespacedKv, HT_AUTH_KEY};
 use reqwest::blocking::Client;
+use reqwest::StatusCode as HttpStatusCode;
 use serde::Serialize;
 use std::error::Error;
 use std::fmt;
+use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::debug;
 
@@ -34,11 +35,8 @@ pub trait RootRegistrar {
         network_info: Option<&NetworkInfo>,
     ) -> Result<RegistrationResult, RootRegistrationError>;
 
-    fn deregister(
-        &self,
-        context: &CommonContext,
-        token: &str,
-    ) -> Result<(), RootRegistrationError>;
+    fn deregister(&self, context: &CommonContext, token: &str)
+        -> Result<(), RootRegistrationError>;
 }
 
 #[derive(Debug)]
@@ -56,17 +54,44 @@ pub enum RootRegistrationError {
     InvalidEndpoint,
 }
 
+#[derive(Clone, Debug, Serialize)]
+enum CandidateKind {
+    Local,
+    StunPublic,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct EndpointCandidate {
+    kind: CandidateKind,
+    addr: SocketAddr,
+    priority: u32,
+}
+
 #[derive(Serialize)]
 struct NodeRegistrationPayload<'a> {
     public_key_hex: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public_ip: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    local_ip: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    local_port: Option<u16>,
+    candidates: Vec<EndpointCandidate>,
+}
+
+impl NetworkInfo {
+    fn to_candidates(&self) -> Vec<EndpointCandidate> {
+        let mut candidates = Vec::new();
+        if let Ok(addr) = format!("{}:{}", self.local_ip, self.local_port).parse() {
+            candidates.push(EndpointCandidate {
+                kind: CandidateKind::Local,
+                addr,
+                priority: 100,
+            });
+        }
+        if let Ok(addr) = format!("{}:{}", self.public_ip, self.public_port).parse() {
+            candidates.push(EndpointCandidate {
+                kind: CandidateKind::StunPublic,
+                addr,
+                priority: 50,
+            });
+        }
+        candidates
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -109,10 +134,9 @@ impl RootRegistrar for HttpRootRegistrar {
         let endpoint = endpoint(&context.kv)?;
         let payload = NodeRegistrationPayload {
             public_key_hex,
-            public_ip: network_info.map(|n| n.public_ip.as_str()),
-            public_port: network_info.map(|n| n.public_port),
-            local_ip: network_info.map(|n| n.local_ip.as_str()),
-            local_port: network_info.map(|n| n.local_port),
+            candidates: network_info
+                .map(NetworkInfo::to_candidates)
+                .unwrap_or_default(),
         };
 
         let response = self
@@ -124,9 +148,8 @@ impl RootRegistrar for HttpRootRegistrar {
             .map_err(RootRegistrationError::Request)?;
 
         if response.status().is_success() {
-            let registration_response: EndpointRegistrationResponse = response
-                .json()
-                .map_err(RootRegistrationError::Request)?;
+            let registration_response: EndpointRegistrationResponse =
+                response.json().map_err(RootRegistrationError::Request)?;
             debug!("Endpoint registration sent to root");
             Ok(RegistrationResult {
                 endpoint_id: registration_response.endpoint_id,
@@ -236,7 +259,7 @@ impl Error for RootRegistrationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
+    use crate::context::{initialize_kv, CommonContext};
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -273,7 +296,8 @@ mod tests {
             Ok(RegistrationResult {
                 endpoint_id: endpoint_name,
                 token: "test-token".to_string(),
-                gateway_public_key_hex: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+                gateway_public_key_hex:
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
                 assigned_ip: "100.64.0.1".to_string(),
             })
         }

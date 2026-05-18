@@ -1,9 +1,9 @@
+use crate::context::{GatewayAuthService, NamespacedKv};
 use askama::Template;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use crate::context::{GatewayAuthService, NamespacedKv};
 use std::sync::{Arc, RwLock};
 
 pub(crate) const ENDPOINT_REGISTRATION_PREFIX: &str = "endpoints/registry";
@@ -11,11 +11,27 @@ pub(crate) const ENDPOINT_TOKEN_PREFIX: &str = "endpoints/tokens";
 pub(crate) const AUTH_HEADER: &str = "x-ht-auth";
 pub(crate) const SESSION_NAMESPACE: &[u8] = b"sessions";
 pub(crate) const SESSION_COOKIE: &str = "ht_session";
+pub(crate) const CONNECTION_INTENT_PREFIX: &str = "connections/intents";
 
 #[derive(Clone)]
 pub(crate) struct ApiState {
     pub(crate) kv: Arc<RwLock<NamespacedKv>>,
     pub(crate) auth: Arc<GatewayAuthService>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum CandidateKind {
+    Local,
+    StunPublic,
+    HolePunch,
+    Relay,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct EndpointCandidate {
+    pub(crate) kind: CandidateKind,
+    pub(crate) addr: std::net::SocketAddr,
+    pub(crate) priority: u32,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -27,14 +43,32 @@ pub(crate) struct EndpointRegistrationRequest {
     pub(crate) token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) assigned_ip: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) public_ip: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) public_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) local_ip: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) local_port: Option<u16>,
+    pub(crate) candidates: Vec<EndpointCandidate>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConnectionIntentRequest {
+    pub(crate) target: String,
+    pub(crate) port: u16,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConnectionIntent {
+    pub(crate) connection_id: String,
+    pub(crate) initiator_endpoint_id: String,
+    pub(crate) target_endpoint_id: String,
+    pub(crate) port: u16,
+    pub(crate) initiator: EndpointRegistrationRequest,
+    pub(crate) target: EndpointRegistrationRequest,
+    pub(crate) created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConnectionIntentResponse {
+    pub(crate) connection_id: String,
+    pub(crate) port: u16,
+    pub(crate) initiator: EndpointRegistrationRequest,
+    pub(crate) target: EndpointRegistrationRequest,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -114,15 +148,11 @@ pub(crate) enum RootApiError {
 impl IntoResponse for RootApiError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            RootApiError::Unauthorized => {
-                StatusCode::UNAUTHORIZED.into_response()
-            }
+            RootApiError::Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
             RootApiError::InvalidPublicKey => {
                 (StatusCode::BAD_REQUEST, "invalid public key").into_response()
             }
-            RootApiError::NotFound => {
-                StatusCode::NOT_FOUND.into_response()
-            }
+            RootApiError::NotFound => StatusCode::NOT_FOUND.into_response(),
             RootApiError::Storage(message) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
             }
@@ -130,5 +160,40 @@ impl IntoResponse for RootApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod type_tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_candidate_round_trips_json() {
+        let candidate = EndpointCandidate {
+            kind: CandidateKind::Local,
+            addr: "192.168.4.63:33565".parse().unwrap(),
+            priority: 100,
+        };
+
+        let json = serde_json::to_string(&candidate).unwrap();
+        assert!(json.contains("Local"));
+        assert!(json.contains("192.168.4.63:33565"));
+
+        let decoded: EndpointCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.kind, CandidateKind::Local);
+        assert_eq!(decoded.addr.to_string(), "192.168.4.63:33565");
+        assert_eq!(decoded.priority, 100);
+    }
+
+    #[test]
+    fn connection_intent_round_trips_json() {
+        let request = ConnectionIntentRequest {
+            target: "ht-unlimited-machine-6327".to_string(),
+            port: 8080,
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: ConnectionIntentRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.target, "ht-unlimited-machine-6327");
+        assert_eq!(decoded.port, 8080);
     }
 }
