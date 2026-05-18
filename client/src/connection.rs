@@ -9,6 +9,7 @@ use crate::types::{
 use reqwest::StatusCode;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::{debug, info, warn};
 use wireguard::connection::Connection;
 use wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
@@ -229,8 +230,28 @@ impl HightowerConnection {
         // This information is sent to the gateway so peers can reach us directly.
         let local_addr = connection.local_addr();
 
-        let network_info = crate::ip_discovery::discover_with_bound_address(local_addr, None)
-            .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
+        let network_info = {
+            let stun_server = crate::ip_discovery::default_stun_server(None);
+            let stun_addr = tokio::net::lookup_host(&stun_server)
+                .await
+                .map_err(|e| {
+                    ClientError::NetworkDiscovery(format!(
+                        "failed to resolve STUN server {stun_server}: {e}"
+                    ))
+                })?
+                .next()
+                .ok_or_else(|| {
+                    ClientError::NetworkDiscovery(format!(
+                        "no addresses resolved for STUN server {stun_server}"
+                    ))
+                })?;
+            let public_addr = connection
+                .discover_public_addr(stun_addr, Duration::from_secs(5))
+                .await
+                .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?;
+            crate::ip_discovery::network_info_from_addresses(local_addr, public_addr)
+                .map_err(|e| ClientError::NetworkDiscovery(e.to_string()))?
+        };
 
         debug!(
             public_ip = %network_info.public_ip,
@@ -514,12 +535,10 @@ impl HightowerConnection {
     /// This method:
     /// 1. Fetches peer info from gateway (public key, endpoint, etc.)
     /// 2. Adds peer to WireGuard if not already present
-    /// 3. Dials the peer over the WireGuard network
+    /// 3. Dials the peer over the app-level encrypted transport
     ///
     /// # Arguments
     /// * `peer` - Endpoint ID (e.g., "ht-festive-penguin") or assigned IP (e.g., "100.64.0.5")
-    /// * `port` - Port to connect to on the peer
-    ///
     /// # Example
     /// ```no_run
     /// # async fn example(conn: &hightower_client::HightowerConnection) -> Result<(), Box<dyn std::error::Error>> {
@@ -592,6 +611,9 @@ impl HightowerConnection {
                 .map_err(|e| {
                     ClientError::Transport(format!("failed to sync pending peer: {}", e))
                 })?;
+            ConnectionBroker::new(self)
+                .punch_candidates(&intent.initiator, &intent.connection_id)
+                .await;
             synced += 1;
         }
 
@@ -604,6 +626,7 @@ impl HightowerConnection {
         port: u16,
     ) -> Result<wireguard::connection::Stream, ClientError> {
         let intent = self.create_connection_intent(peer, port).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let endpoint_id = intent.target.endpoint_id.as_deref().unwrap_or(peer);
 
         debug!(
@@ -613,7 +636,7 @@ impl HightowerConnection {
         );
 
         let stream = ConnectionBroker::new(self)
-            .connect_to_peer(&intent.target)
+            .connect_to_peer(&intent.target, &intent.connection_id)
             .await?;
 
         debug!(endpoint_id = %endpoint_id, port = intent.port, "Successfully connected to peer transport for app port");

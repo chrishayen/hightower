@@ -17,7 +17,7 @@ Manual frank -> shotgun probing proved:
 - Registration works when `HT_STUN_SERVER=5.78.219.236:3478` is set.
 - Peer lookup returns public key, assigned IP, public STUN endpoint, and local endpoint.
 - Direct LAN endpoint handshake works when both sides pre-authorize each other.
-- Current `HightowerConnection::dial(peer, port)` times out because it dials `assigned_ip:port` directly, e.g. `100.64.0.13:8080`, but the virtual IP is not a real OS route.
+- Current `HightowerConnection::dial(peer, port)` must not dial an assigned virtual IP directly; virtual IPs are logical addresses, not OS routes.
 - Responder rejects unknown initiators with `ProtocolError("Unknown peer")` unless the peer public key is pre-added.
 
 Therefore the fix is not to make `100.64.x.x` routable at kernel level. The fix is an app-level virtual network layer:
@@ -785,7 +785,7 @@ for candidate in peer.ordered_candidates() {
 Err(ClientError::Transport(format!("all candidates failed: {}", errors.join(", "))))
 ```
 
-Do not attempt parallel racing until sequential tests are green.
+Sequential candidate fallback is green. The next slice sends bounded NAT punch probes over the same UDP socket before trying public/hole-punch candidates.
 
 **Step 4: Verify**
 
@@ -1322,3 +1322,21 @@ Split implementation into three PRs:
 3. **PR 3:** Client broker + `dial()` rewrite + two-client example/test.
 
 Keep hole punching and relay fallback as follow-up PRs unless PR 3 is already stable and small.
+
+
+### Task 22: Minimal UDP NAT punch probes
+
+**Objective:** Open NAT mappings on both sides before public-candidate handshakes without adding relay infrastructure yet.
+
+Implemented in this slice:
+
+- `wireguard::connection::Connection::send_probe(addr, payload)` sends a small unauthenticated UDP probe from the same socket used by the encrypted transport.
+- The client broker sends `HTPUNCH/1 <connection_id>` probes before attempting `StunPublic` or `HolePunch` candidates.
+- The responder side sends the same probes when `sync_pending_peers()` consumes a gateway connection intent, giving both peers a bounded simultaneous punching window keyed by the gateway `connection_id`.
+- `dial()` no longer takes an unused app port; apps get a peer stream and define any app-level protocol inside that stream.
+
+Still future work:
+
+- true concurrent candidate racing instead of ordered fallback,
+- punch status reporting through the gateway,
+- relay/DERP fallback for NATs that cannot be traversed directly.

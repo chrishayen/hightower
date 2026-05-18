@@ -14,6 +14,32 @@ fn effective_stun_server(explicit: Option<&str>) -> String {
         .unwrap_or_else(|| DEFAULT_STUN_SERVER.to_string())
 }
 
+pub(crate) fn default_stun_server(explicit: Option<&str>) -> String {
+    effective_stun_server(explicit)
+}
+
+pub(crate) fn network_info_from_addresses(
+    local_addr: SocketAddr,
+    public_addr: SocketAddr,
+) -> Result<crate::NetworkInfo, Box<dyn std::error::Error>> {
+    let local_ip = discover_local_ip()?;
+
+    if local_addr.ip() != local_ip && !local_addr.ip().is_unspecified() {
+        warn!(
+            bound_ip = %local_addr.ip(),
+            discovered_ip = %local_ip,
+            "Bound IP differs from discovered local IP"
+        );
+    }
+
+    Ok(crate::NetworkInfo {
+        public_ip: public_addr.ip().to_string(),
+        public_port: public_addr.port(),
+        local_ip: local_ip.to_string(),
+        local_port: local_addr.port(),
+    })
+}
+
 /// Discovers network information using a bound socket address
 ///
 /// This is used when a transport server is already bound to a specific port.
@@ -43,24 +69,7 @@ pub fn discover_with_bound_address(
         "Discovered public address via STUN"
     );
 
-    // Discover local IP
-    let local_ip = discover_local_ip()?;
-
-    // Warn if local IP from socket doesn't match discovered local IP
-    if local_addr.ip() != local_ip && !local_addr.ip().is_unspecified() {
-        warn!(
-            bound_ip = %local_addr.ip(),
-            discovered_ip = %local_ip,
-            "Bound IP differs from discovered local IP"
-        );
-    }
-
-    Ok(crate::NetworkInfo {
-        public_ip: public_addr.ip().to_string(),
-        public_port: public_addr.port(),
-        local_ip: local_ip.to_string(),
-        local_port: local_addr.port(),
-    })
+    network_info_from_addresses(local_addr, public_addr)
 }
 
 /// Discovers the local IP address by determining which interface would be used

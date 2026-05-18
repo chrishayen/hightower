@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Dial the peer (this also fetches peer info internally)
-    println!("\n3. Connecting to peer on port 8080...");
+    println!("\n3. Connecting to peer...");
     match connection.dial(&peer_endpoint, 8080).await {
         Ok(mut stream) => {
             println!("   ✓ Connected to peer!");

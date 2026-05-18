@@ -16,7 +16,7 @@ pub const MAPPED_ADDRESS: u16 = 0x0001;
 pub const FAMILY_IPV4: u8 = 0x01;
 pub const FAMILY_IPV6: u8 = 0x02;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TransactionId([u8; 12]);
 
 impl TransactionId {

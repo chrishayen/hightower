@@ -240,6 +240,7 @@ mod tests {
             response.target.endpoint_id.as_deref(),
             Some(target.endpoint_id.as_str())
         );
+        assert_eq!(response.port, 8080);
 
         let pending = get_pending_connection_intents(
             State(state.clone()),

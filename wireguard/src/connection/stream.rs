@@ -1,6 +1,7 @@
-use crate::crypto::PublicKey25519;
 use super::error::Error;
+use crate::crypto::PublicKey25519;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
@@ -20,6 +21,19 @@ pub(super) enum Command {
         endpoint: Option<SocketAddr>,
         persistent_keepalive: Option<u16>,
         reply: oneshot::Sender<Result<(), Error>>,
+    },
+    SendProbe {
+        addr: SocketAddr,
+        payload: Vec<u8>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    DiscoverPublicAddr {
+        stun_server: SocketAddr,
+        timeout: Duration,
+        reply: oneshot::Sender<Result<SocketAddr, Error>>,
+    },
+    ExpireStunRequest {
+        transaction_id: stun::TransactionId,
     },
     SendData {
         stream_id: StreamId,
