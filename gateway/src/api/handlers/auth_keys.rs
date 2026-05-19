@@ -1,15 +1,16 @@
 use askama::Template;
 use axum::{
     extract::{Json, Path as AxumPath, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
-use crate::context::NamespacedKv;
 use super::super::types::{ApiState, AuthKeysListTemplate};
+use super::sessions::has_valid_session;
+use crate::context::NamespacedKv;
 
 const AUTH_KEYS_PREFIX: &str = "auth/keys";
 
@@ -37,6 +38,7 @@ pub struct AuthKeyListItem {
 
 #[derive(Debug)]
 pub enum AuthKeyError {
+    Unauthorized,
     Storage(String),
     NotFound,
 }
@@ -44,20 +46,22 @@ pub enum AuthKeyError {
 impl IntoResponse for AuthKeyError {
     fn into_response(self) -> Response {
         match self {
+            AuthKeyError::Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
             AuthKeyError::Storage(msg) => {
                 error!("Auth key storage error: {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "storage error").into_response()
             }
-            AuthKeyError::NotFound => {
-                (StatusCode::NOT_FOUND, "key not found").into_response()
-            }
+            AuthKeyError::NotFound => (StatusCode::NOT_FOUND, "key not found").into_response(),
         }
     }
 }
 
 pub(crate) async fn generate_auth_key(
     State(state): State<ApiState>,
+    headers: HeaderMap,
 ) -> Result<Json<GenerateKeyResponse>, AuthKeyError> {
+    ensure_console_session(&state, &headers)?;
+
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
@@ -71,8 +75,14 @@ pub(crate) async fn generate_auth_key(
         .unwrap()
         .as_secs() as i64;
 
-    let last_chars = key.chars().rev().take(8).collect::<String>()
-        .chars().rev().collect::<String>();
+    let last_chars = key
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
 
     let auth_key = AuthKey {
         key_id: key_id.clone(),
@@ -94,12 +104,19 @@ pub(crate) async fn generate_auth_key(
 
 pub(crate) async fn list_auth_keys(
     State(state): State<ApiState>,
+    headers: HeaderMap,
 ) -> Result<Response, AuthKeyError> {
+    ensure_console_session(&state, &headers)?;
+
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
     };
 
+    render_auth_keys_list(&kv)
+}
+
+fn render_auth_keys_list(kv: &NamespacedKv) -> Result<Response, AuthKeyError> {
     let prefix = AUTH_KEYS_PREFIX.as_bytes();
     let entries = kv
         .list_by_prefix(prefix)
@@ -140,7 +157,10 @@ pub(crate) async fn list_auth_keys(
 pub(crate) async fn revoke_auth_key(
     State(state): State<ApiState>,
     AxumPath(key_id): AxumPath<String>,
+    headers: HeaderMap,
 ) -> Result<Response, AuthKeyError> {
+    ensure_console_session(&state, &headers)?;
+
     let kv = {
         let guard = state.kv.read().expect("gateway shared kv read lock");
         guard.clone()
@@ -164,10 +184,24 @@ pub(crate) async fn revoke_auth_key(
     debug!(key_id = %key_id, "Revoked auth key");
 
     // Return updated list
-    list_auth_keys(State(state)).await
+    render_auth_keys_list(&kv)
 }
 
-pub(crate) fn validate_auth_key(kv: &NamespacedKv, provided_key: &str) -> Result<bool, ::kv::Error> {
+fn ensure_console_session(state: &ApiState, headers: &HeaderMap) -> Result<(), AuthKeyError> {
+    match has_valid_session(state, headers) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(AuthKeyError::Unauthorized),
+        Err(err) => Err(AuthKeyError::Storage(format!(
+            "failed to validate session: {}",
+            err
+        ))),
+    }
+}
+
+pub(crate) fn validate_auth_key(
+    kv: &NamespacedKv,
+    provided_key: &str,
+) -> Result<bool, ::kv::Error> {
     let prefix = AUTH_KEYS_PREFIX.as_bytes();
     let entries = kv.list_by_prefix(prefix)?;
 
@@ -201,7 +235,7 @@ fn generate_key_id() -> String {
 }
 
 fn hash_key(key: &str) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
     hex::encode(hasher.finalize())
@@ -240,8 +274,14 @@ pub(crate) fn store_legacy_key(kv: &NamespacedKv, key: &str) -> Result<(), AuthK
         .unwrap()
         .as_secs() as i64;
 
-    let last_chars = key.chars().rev().take(8).collect::<String>()
-        .chars().rev().collect::<String>();
+    let last_chars = key
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
 
     let auth_key = AuthKey {
         key_id: "default".to_string(),
@@ -256,22 +296,105 @@ pub(crate) fn store_legacy_key(kv: &NamespacedKv, key: &str) -> Result<(), AuthK
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::handlers::sessions::create_session;
+    use crate::api::types::{SessionRequest, SESSION_COOKIE};
     use crate::context::{initialize_kv, CommonContext};
+    use axum::http::{
+        header::{COOKIE, SET_COOKIE},
+        HeaderMap, HeaderValue,
+    };
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
 
-    #[tokio::test]
-    async fn generate_key_creates_valid_key() {
+    fn test_state() -> (TempDir, ApiState) {
         let temp = TempDir::new().expect("tempdir");
         let kv = initialize_kv(Some(temp.path())).expect("kv init");
         let context = CommonContext::new(kv);
+        context
+            .auth
+            .create_user("console-admin", "super-secret")
+            .expect("create default user");
 
         let state = ApiState {
             kv: Arc::new(RwLock::new(context.kv.clone())),
             auth: Arc::clone(&context.auth),
         };
 
-        let response = generate_auth_key(State(state))
+        (temp, state)
+    }
+
+    async fn authenticated_headers(state: &ApiState) -> HeaderMap {
+        let response = create_session(
+            State(state.clone()),
+            Json(SessionRequest {
+                username: "console-admin".into(),
+                password: "super-secret".into(),
+            }),
+        )
+        .await
+        .expect("session creation succeeds");
+
+        let cookie_header = response
+            .headers()
+            .get(SET_COOKIE)
+            .expect("set-cookie present")
+            .to_str()
+            .expect("cookie str");
+        let token = cookie_header
+            .split(';')
+            .next()
+            .and_then(|segment| segment.strip_prefix(&format!("{}=", SESSION_COOKIE)))
+            .expect("session token present")
+            .to_string();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_str(&format!("{}={}", SESSION_COOKIE, token))
+                .expect("cookie header value"),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn generate_key_requires_console_session() {
+        let (_temp, state) = test_state();
+
+        let err = generate_auth_key(State(state), HeaderMap::new())
+            .await
+            .expect_err("unauthenticated generation is rejected");
+
+        assert_eq!(err.into_response().status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn list_keys_requires_console_session() {
+        let (_temp, state) = test_state();
+
+        let err = list_auth_keys(State(state), HeaderMap::new())
+            .await
+            .expect_err("unauthenticated listing is rejected");
+
+        assert_eq!(err.into_response().status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn revoke_key_requires_console_session() {
+        let (_temp, state) = test_state();
+
+        let err = revoke_auth_key(State(state), AxumPath("missing".into()), HeaderMap::new())
+            .await
+            .expect_err("unauthenticated revocation is rejected");
+
+        assert_eq!(err.into_response().status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn generate_key_creates_valid_key_for_authenticated_console_user() {
+        let (_temp, state) = test_state();
+        let headers = authenticated_headers(&state).await;
+
+        let response = generate_auth_key(State(state), headers)
             .await
             .expect("generate succeeds");
 
@@ -282,20 +405,14 @@ mod tests {
 
     #[tokio::test]
     async fn list_keys_returns_generated_keys() {
-        let temp = TempDir::new().expect("tempdir");
-        let kv = initialize_kv(Some(temp.path())).expect("kv init");
-        let context = CommonContext::new(kv);
+        let (_temp, state) = test_state();
+        let headers = authenticated_headers(&state).await;
 
-        let state = ApiState {
-            kv: Arc::new(RwLock::new(context.kv.clone())),
-            auth: Arc::clone(&context.auth),
-        };
-
-        let _ = generate_auth_key(State(state.clone()))
+        let _ = generate_auth_key(State(state.clone()), headers.clone())
             .await
             .expect("generate succeeds");
 
-        let response = list_auth_keys(State(state))
+        let response = list_auth_keys(State(state), headers)
             .await
             .expect("list succeeds");
 

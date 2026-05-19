@@ -6,7 +6,9 @@ use axum::{
 };
 use tracing::error;
 
-use super::super::types::{ApiState, DashboardTemplate, EndpointsTemplate, LoginTemplate, SettingsTemplate};
+use super::super::types::{
+    ApiState, DashboardTemplate, EndpointsTemplate, LoginTemplate, SettingsTemplate,
+};
 use super::sessions::has_valid_session;
 
 pub(crate) async fn console_root() -> Response {
@@ -19,7 +21,10 @@ pub(crate) async fn console_root() -> Response {
     }
 }
 
-pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_dashboard(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match DashboardTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -40,7 +45,10 @@ pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: He
     }
 }
 
-pub(crate) async fn console_endpoints(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_endpoints(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match EndpointsTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -61,7 +69,10 @@ pub(crate) async fn console_endpoints(State(state): State<ApiState>, headers: He
     }
 }
 
-pub(crate) async fn console_settings(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_settings(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match SettingsTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -85,14 +96,14 @@ pub(crate) async fn console_settings(State(state): State<ApiState>, headers: Hea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
     use crate::api::handlers::sessions::create_session;
     use crate::api::types::{SessionRequest, SESSION_COOKIE};
+    use crate::context::{initialize_kv, CommonContext};
+    use axum::http::HeaderValue;
     use axum::{
         extract::Json,
         http::header::{COOKIE, SET_COOKIE},
     };
-    use axum::http::HeaderValue;
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
 
@@ -173,5 +184,63 @@ mod tests {
         let rendered = String::from_utf8(body_bytes.into()).expect("body utf8");
         assert!(rendered.contains("Dashboard"));
         assert!(rendered.contains("hx-get=\"/api/dashboard/endpoints\""));
+    }
+
+    #[tokio::test]
+    async fn apps_console_uses_app_and_api_key_language() {
+        let temp = TempDir::new().expect("tempdir");
+        let kv = initialize_kv(Some(temp.path())).expect("kv init");
+        let context = CommonContext::new(kv);
+        context
+            .auth
+            .create_user("console-admin", "super-secret")
+            .expect("create default user");
+
+        let state = ApiState {
+            kv: Arc::new(RwLock::new(context.kv.clone())),
+            auth: Arc::clone(&context.auth),
+        };
+
+        let response = create_session(
+            State(state.clone()),
+            Json(SessionRequest {
+                username: "console-admin".into(),
+                password: "super-secret".into(),
+            }),
+        )
+        .await
+        .expect("session creation succeeds");
+        let cookie_header = response
+            .headers()
+            .get(SET_COOKIE)
+            .expect("set-cookie present")
+            .to_str()
+            .expect("cookie str");
+        let token = cookie_header
+            .split(';')
+            .next()
+            .and_then(|segment| segment.strip_prefix(&format!("{}=", SESSION_COOKIE)))
+            .expect("session token present")
+            .to_string();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_str(&format!("{}={}", SESSION_COOKIE, token))
+                .expect("cookie header value"),
+        );
+
+        let response = console_endpoints(State(state), headers).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read body");
+        let rendered = String::from_utf8(body_bytes.into()).expect("body utf8");
+        assert!(rendered.contains("Apps"));
+        assert!(rendered.contains("API Keys"));
+        assert!(rendered.contains("Generate API Key"));
+        assert!(rendered.contains("Registered Apps"));
+        assert!(rendered.contains("/apps"));
     }
 }

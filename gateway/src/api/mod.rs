@@ -171,6 +171,7 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
     let console_routes = Router::new()
         .route("/", get(console_root))
         .route("/dashboard", get(console_dashboard))
+        .route("/apps", get(console_endpoints))
         .route("/endpoints", get(console_endpoints))
         .route("/settings", get(console_settings));
 
