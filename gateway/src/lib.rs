@@ -10,10 +10,10 @@ pub mod wireguard_api;
 
 pub use common::*;
 
-pub use api::{start, start_with_email};
+pub use api::{start, start_with_config, start_with_email, GatewayServerConfig};
 pub use client::{
-    HttpRootRegistrar, ROOT_ENDPOINT_KEY, RegistrationResult, RootRegistrar, RootRegistrationError,
-    default_registrar,
+    default_registrar, HttpRootRegistrar, RegistrationResult, RootRegistrar, RootRegistrationError,
+    ROOT_ENDPOINT_KEY,
 };
 
 pub type WaitForGatewayError = WaitForRootError;
@@ -25,8 +25,14 @@ use std::time::{Duration, Instant};
 use tracing::debug;
 
 pub fn wait_until_ready(timeout: Duration) -> Result<(), WaitForRootError> {
+    wait_until_ready_at(readiness_address(), timeout)
+}
+
+pub fn wait_until_ready_at(
+    readiness_addr: SocketAddr,
+    timeout: Duration,
+) -> Result<(), WaitForRootError> {
     let start = Instant::now();
-    let readiness_addr = readiness_address();
     let request_bytes = b"GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
     const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(200);
     let mut attempts: u32 = 0;

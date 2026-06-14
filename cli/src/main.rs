@@ -2,6 +2,8 @@ mod commands;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "ht")]
@@ -17,6 +19,40 @@ enum Commands {
     Stun {
         /// STUN server address (format: host:port or host, default port: 3478)
         address: String,
+    },
+    /// Run a STUN server
+    StunServer {
+        /// Address to bind to
+        #[arg(short, long, default_value = "0.0.0.0:3478")]
+        bind: String,
+    },
+    /// Run gateway server
+    Gateway {
+        /// Path to the key-value database
+        #[arg(long = "kv", value_name = "DIR")]
+        kv: Option<PathBuf>,
+
+        /// Email address for Let's Encrypt certificate notifications
+        #[arg(long, value_name = "EMAIL")]
+        email: Option<String>,
+
+        /// HTTP bind host
+        #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+        http_host: IpAddr,
+
+        /// HTTP bind port
+        #[arg(long, default_value_t = 8008)]
+        http_port: u16,
+
+        /// Enable HTTPS listener on 0.0.0.0:443
+        #[arg(long)]
+        https: bool,
+    },
+    /// Run node client
+    Node {
+        /// Path to the key-value data directory
+        #[arg(long = "kv", value_name = "DIR")]
+        kv: Option<PathBuf>,
     },
     /// Fetch content from WireGuard peer endpoints via hightower
     Curl {
@@ -35,29 +71,6 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Run services
-    Run {
-        #[command(subcommand)]
-        command: RunCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum RunCommands {
-    /// Run STUN server
-    Stun {
-        /// Address to bind to (default: 0.0.0.0:3478)
-        #[arg(short, long, default_value = "0.0.0.0:3478")]
-        bind: String,
-    },
-    /// Run gateway server
-    Gateway {
-        /// Path to the key-value database (default: /var/lib/hightower/gateway/db)
-        #[arg(long, default_value = "/var/lib/hightower/gateway/db")]
-        kv_path: String,
-    },
-    /// Run node client
-    Node,
 }
 
 #[tokio::main]
@@ -68,31 +81,29 @@ async fn main() -> Result<()> {
         Commands::Stun { address } => {
             commands::stun_client::query(&address)?;
         }
+        Commands::StunServer { bind } => {
+            commands::stun_server::run_stun(&bind)?;
+        }
+        Commands::Gateway {
+            kv,
+            email,
+            http_host,
+            http_port,
+            https,
+        } => {
+            commands::gateway::run_gateway(kv.as_deref(), email, http_host, http_port, https)?;
+        }
+        Commands::Node { kv } => {
+            commands::node::run_node(kv.as_deref()).await?;
+        }
         Commands::Curl {
             url,
             gateway,
             auth_token,
             verbose,
         } => {
-            commands::curl::run(
-                &url,
-                gateway.as_deref(),
-                auth_token.as_deref(),
-                verbose,
-            )
-            .await?;
+            commands::curl::run(&url, gateway.as_deref(), auth_token.as_deref(), verbose).await?;
         }
-        Commands::Run { command } => match command {
-            RunCommands::Stun { bind } => {
-                commands::stun_server::run_stun(&bind)?;
-            }
-            RunCommands::Gateway { kv_path } => {
-                commands::gateway::run_gateway(&kv_path)?;
-            }
-            RunCommands::Node => {
-                commands::node::run_node()?;
-            }
-        },
     }
 
     Ok(())

@@ -13,7 +13,7 @@ cargo build
 Using the Makefile (recommended):
 
 ```bash
-make dev
+make gateway-dev
 ```
 
 Or directly with cargo:
@@ -54,6 +54,6 @@ The web console is rendered server-side using Askama templates located in the `t
 - `templates/login.html` - Login page
 - `templates/dashboard.html` - Dashboard page
 - `templates/login_alert.html` - Login alert fragment
-- `templates/nodes_table.html` - Nodes table fragment
+- `templates/nodes_table.html` - Endpoints table fragment
 
 The templates compile with the Rust code, so no separate build step is needed.

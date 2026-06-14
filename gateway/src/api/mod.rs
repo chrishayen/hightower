@@ -13,6 +13,7 @@ use axum::{
 };
 use hyper_util::rt::TokioIo;
 use rustls::ServerConfig;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, OnceLock, RwLock};
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
@@ -30,6 +31,55 @@ use types::ApiState;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+#[derive(Clone, Debug)]
+pub struct GatewayServerConfig {
+    pub http_addr: SocketAddr,
+    pub https_addr: SocketAddr,
+    pub https_disabled: bool,
+    pub email: Option<String>,
+}
+
+impl GatewayServerConfig {
+    pub fn from_env(email: Option<String>) -> Self {
+        Self {
+            http_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), get_http_port()),
+            https_addr: HTTPS_ADDRESS.parse().expect("valid https address"),
+            https_disabled: is_https_disabled(),
+            email,
+        }
+    }
+
+    pub fn local_dev(email: Option<String>) -> Self {
+        Self {
+            http_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8008),
+            https_addr: HTTPS_ADDRESS.parse().expect("valid https address"),
+            https_disabled: true,
+            email,
+        }
+    }
+
+    pub fn readiness_addr(&self) -> SocketAddr {
+        let ip = if self.http_addr.ip().is_unspecified() {
+            match self.http_addr.ip() {
+                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            }
+        } else {
+            self.http_addr.ip()
+        };
+
+        SocketAddr::new(ip, self.http_addr.port())
+    }
+
+    pub fn http_url(&self) -> String {
+        let addr = self.readiness_addr();
+        match addr.ip() {
+            IpAddr::V4(ip) => format!("http://{}:{}", ip, addr.port()),
+            IpAddr::V6(ip) => format!("http://[{}]:{}", ip, addr.port()),
+        }
+    }
+}
+
 fn get_http_port() -> u16 {
     std::env::var("HTTP_PORT")
         .ok()
@@ -46,12 +96,10 @@ fn is_https_disabled() -> bool {
 
 pub(crate) const HTTPS_ADDRESS: &str = "0.0.0.0:443";
 
-fn http_address() -> String {
-    format!("0.0.0.0:{}", get_http_port())
-}
-
 pub(crate) fn api_address() -> String {
-    format!("127.0.0.1:{}", get_http_port())
+    GatewayServerConfig::from_env(None)
+        .readiness_addr()
+        .to_string()
 }
 
 pub(crate) static API_SHARED_KV: OnceLock<Arc<RwLock<NamespacedKv>>> = OnceLock::new();
@@ -86,6 +134,10 @@ pub fn start(context: &CommonContext) {
 }
 
 pub fn start_with_email(context: &CommonContext, email: Option<String>) {
+    start_with_config(context, GatewayServerConfig::from_env(email));
+}
+
+pub fn start_with_config(context: &CommonContext, config: GatewayServerConfig) {
     debug!("Gateway starting");
 
     let certificate = crate::startup::startup();
@@ -102,7 +154,7 @@ pub fn start_with_email(context: &CommonContext, email: Option<String>) {
     let _acme_client = ACME_CLIENT.get_or_init(|| {
         Arc::new(crate::acme::AcmeClient::new(
             shared_kv.clone(),
-            email.clone(),
+            config.email.clone(),
         ))
     });
 
@@ -114,6 +166,7 @@ pub fn start_with_email(context: &CommonContext, email: Option<String>) {
     API_LAUNCH.get_or_init(|| {
         let dispatcher = dispatcher::get_default(|current| current.clone());
         let cert_for_thread = certificate.clone();
+        let config_for_thread = config.clone();
         std::thread::Builder::new()
             .name("gateway".into())
             .spawn({
@@ -131,7 +184,10 @@ pub fn start_with_email(context: &CommonContext, email: Option<String>) {
                             // Initialize WireGuard transport before starting HTTP server
                             crate::wireguard_api::initialize(&cert_for_thread).await;
 
-                            if let Err(err) = start_servers(kv_for_thread, auth_for_thread).await {
+                            if let Err(err) =
+                                start_servers(kv_for_thread, auth_for_thread, config_for_thread)
+                                    .await
+                            {
                                 error!(?err, "Gateway server terminated unexpectedly");
                             }
                         });
@@ -196,21 +252,20 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
 async fn start_servers(
     shared_kv: Arc<RwLock<NamespacedKv>>,
     auth: Arc<GatewayAuthService>,
+    config: GatewayServerConfig,
 ) -> Result<(), BoxError> {
     // Install default crypto provider for rustls (required in rustls 0.23+)
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let app = build_router(shared_kv.clone(), auth.clone());
 
-    let https_disabled = is_https_disabled();
-
     // Try to bind both servers first to provide better error messages
-    let http_addr: std::net::SocketAddr = http_address().parse().expect("valid http address");
-    let https_addr: std::net::SocketAddr = HTTPS_ADDRESS.parse().expect("valid https address");
+    let http_addr = config.http_addr;
+    let https_addr = config.https_addr;
 
     let http_listener = TcpListener::bind(http_addr).await;
-    let https_listener = if https_disabled {
-        debug!("HTTPS disabled via DISABLE_HTTPS environment variable");
+    let https_listener = if config.https_disabled {
+        debug!("HTTPS disabled by gateway configuration");
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "HTTPS disabled",
@@ -222,7 +277,7 @@ async fn start_servers(
     // Check if at least one server can start
     match (&http_listener, &https_listener) {
         (Err(http_err), Err(https_err)) => {
-            if https_disabled {
+            if config.https_disabled {
                 error!(?http_err, address = %http_addr, "Failed to bind HTTP server");
                 error!("HTTP server failed to bind and HTTPS is disabled. Gateway requires at least one working server.");
             } else {
@@ -237,7 +292,7 @@ async fn start_servers(
             error!(?err, address = %http_addr, "HTTP server failed to bind, continuing with HTTPS only");
         }
         (Ok(_), Err(err)) => {
-            if !https_disabled {
+            if !config.https_disabled {
                 error!(?err, address = %https_addr, "HTTPS server failed to bind, continuing with HTTP only");
             } else {
                 debug!("HTTPS disabled, running HTTP only");
@@ -373,6 +428,16 @@ mod tests {
     use std::sync::mpsc;
     use tempfile::TempDir;
     use types::EndpointRegistrationRequest;
+
+    #[test]
+    fn local_dev_config_uses_loopback_http_and_disables_https() {
+        let config = GatewayServerConfig::local_dev(None);
+
+        assert_eq!(config.http_addr, "127.0.0.1:8008".parse().unwrap());
+        assert_eq!(config.readiness_addr(), config.http_addr);
+        assert_eq!(config.http_url(), "http://127.0.0.1:8008");
+        assert!(config.https_disabled);
+    }
 
     #[test]
     fn start_initializes_server() {

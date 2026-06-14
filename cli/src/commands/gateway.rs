@@ -1,23 +1,34 @@
-use anyhow::{Result, bail};
-use std::path::PathBuf;
+use anyhow::{bail, Result};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::time::Duration;
 
-pub fn run_gateway(kv_path: &str) -> Result<()> {
+pub fn run_gateway(
+    kv_path: Option<&Path>,
+    email: Option<String>,
+    http_host: IpAddr,
+    http_port: u16,
+    https: bool,
+) -> Result<()> {
     let _logging_guard = gateway::logging::init();
 
-    let kv_path = PathBuf::from(kv_path);
-    let context = gateway::context::initialize_with_token_source(
-        Some(&kv_path),
-        |key| std::env::var(key)
-    )?;
+    let context =
+        gateway::context::initialize_with_token_source(kv_path, |key| std::env::var(key))?;
 
-    gateway::start(&context);
+    let config = gateway::GatewayServerConfig {
+        http_addr: SocketAddr::new(http_host, http_port),
+        https_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 443),
+        https_disabled: !https,
+        email,
+    };
+
+    gateway::start_with_config(&context, config.clone());
 
     // Wait for gateway to be ready
-    if let Err(e) = gateway::wait_until_ready(Duration::from_secs(5)) {
+    if let Err(e) = gateway::wait_until_ready_at(config.readiness_addr(), Duration::from_secs(5)) {
         bail!("Failed to start gateway: {:?}", e);
     }
-    println!("Gateway server ready on 0.0.0.0");
+    println!("Gateway server ready at {}", config.http_url());
 
     wait_for_ctrl_c()?;
 

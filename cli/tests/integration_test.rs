@@ -47,8 +47,13 @@ fn test_ht_help() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Hightower CLI tool"));
     assert!(stdout.contains("stun"));
+    assert!(stdout.contains("stun-server"));
+    assert!(stdout.contains("gateway"));
+    assert!(stdout.contains("node"));
     assert!(stdout.contains("curl"));
-    assert!(stdout.contains("run"));
+    assert!(!stdout
+        .lines()
+        .any(|line| line.trim_start().starts_with("run ")));
 }
 
 #[test]
@@ -77,39 +82,32 @@ fn test_ht_stun_requires_address() {
 }
 
 #[test]
-fn test_ht_run_help() {
+fn test_ht_stun_server_help() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "ht", "--", "run", "--help"])
+        .args(&["run", "--bin", "ht", "--", "stun-server", "--help"])
         .output()
-        .expect("Failed to execute ht run");
+        .expect("Failed to execute ht stun-server");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Run services"));
-    assert!(stdout.contains("stun"));
-    assert!(stdout.contains("gateway"));
-    assert!(stdout.contains("node"));
-}
-
-#[test]
-fn test_ht_run_stun_help() {
-    let output = Command::new("cargo")
-        .args(&["run", "--bin", "ht", "--", "run", "stun", "--help"])
-        .output()
-        .expect("Failed to execute ht run stun");
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Run STUN server"));
+    assert!(stdout.contains("Run a STUN server"));
     assert!(stdout.contains("--bind"));
 }
 
 #[test]
-fn test_ht_run_stun_invalid_address() {
+fn test_ht_stun_server_invalid_address() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "ht", "--", "run", "stun", "--bind", "invalid:address"])
+        .args(&[
+            "run",
+            "--bin",
+            "ht",
+            "--",
+            "stun-server",
+            "--bind",
+            "invalid:address",
+        ])
         .output()
-        .expect("Failed to execute ht run stun");
+        .expect("Failed to execute ht stun-server");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -117,16 +115,31 @@ fn test_ht_run_stun_invalid_address() {
 }
 
 #[test]
-fn test_ht_run_gateway_help() {
+fn test_ht_gateway_help() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "ht", "--", "run", "gateway", "--help"])
+        .args(&["run", "--bin", "ht", "--", "gateway", "--help"])
         .output()
-        .expect("Failed to execute ht run gateway");
+        .expect("Failed to execute ht gateway");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Run gateway server"));
-    assert!(stdout.contains("--kv-path"));
-    assert!(stdout.contains("/var/lib/hightower/gateway/db"));
+    assert!(stdout.contains("--kv"));
+    assert!(stdout.contains("--email"));
+    assert!(stdout.contains("--http-host"));
+    assert!(stdout.contains("--http-port"));
+    assert!(stdout.contains("--https"));
 }
 
+#[test]
+fn test_ht_node_help() {
+    let output = Command::new("cargo")
+        .args(&["run", "--bin", "ht", "--", "node", "--help"])
+        .output()
+        .expect("Failed to execute ht node");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Run node client"));
+    assert!(stdout.contains("--kv"));
+}

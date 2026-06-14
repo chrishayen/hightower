@@ -6,7 +6,7 @@
   <title>Hightower · Endpoints</title>
   <meta name="description" content="Manage and configure endpoints in the Hightower mesh.">
   <link rel="stylesheet" href="/static/css/dashboard.css">
-  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="/static/vendor/htmx.min.js" defer></script>
 </head>
 <body>
   <nav id="side-menu" class="side-menu" aria-label="Main navigation">
@@ -88,7 +88,7 @@
         </div>
         <div class="key-display">
           <code id="new-key-value"></code>
-          <button type="button" class="copy-btn" onclick="copyKey()">Copy</button>
+          <button type="button" class="copy-btn" onclick="copyKey(this)">Copy</button>
         </div>
       </div>
 
@@ -158,12 +158,17 @@
     });
   })();
 
-  function copyKey() {
+  function copyKey(btn) {
     const keyText = document.getElementById('new-key-value').textContent;
     navigator.clipboard.writeText(keyText).then(() => {
-      const btn = event.target;
       const originalText = btn.textContent;
       btn.textContent = 'Copied!';
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 2000);
+    }).catch(() => {
+      const originalText = btn.textContent;
+      btn.textContent = 'Copy failed';
       setTimeout(() => {
         btn.textContent = originalText;
       }, 2000);

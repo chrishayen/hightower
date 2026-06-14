@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ht run gateway
+ExecStart=/usr/bin/ht gateway --kv /var/lib/hightower/gateway/db --http-host 0.0.0.0 --http-port 80 --https
 Restart=on-failure
 RestartSec=5
 User=hightower

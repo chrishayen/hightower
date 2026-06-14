@@ -6,7 +6,9 @@ use axum::{
 };
 use tracing::error;
 
-use super::super::types::{ApiState, DashboardTemplate, EndpointsTemplate, LoginTemplate, SettingsTemplate};
+use super::super::types::{
+    ApiState, DashboardTemplate, EndpointsTemplate, LoginTemplate, SettingsTemplate,
+};
 use super::sessions::has_valid_session;
 
 pub(crate) async fn console_root() -> Response {
@@ -19,7 +21,10 @@ pub(crate) async fn console_root() -> Response {
     }
 }
 
-pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_dashboard(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match DashboardTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -40,7 +45,10 @@ pub(crate) async fn console_dashboard(State(state): State<ApiState>, headers: He
     }
 }
 
-pub(crate) async fn console_endpoints(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_endpoints(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match EndpointsTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -61,7 +69,10 @@ pub(crate) async fn console_endpoints(State(state): State<ApiState>, headers: He
     }
 }
 
-pub(crate) async fn console_settings(State(state): State<ApiState>, headers: HeaderMap) -> Response {
+pub(crate) async fn console_settings(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Response {
     match has_valid_session(&state, &headers) {
         Ok(true) => match SettingsTemplate.render() {
             Ok(html) => (StatusCode::OK, Html(html)).into_response(),
@@ -85,14 +96,17 @@ pub(crate) async fn console_settings(State(state): State<ApiState>, headers: Hea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
     use crate::api::handlers::sessions::create_session;
-    use crate::api::types::{SessionRequest, SESSION_COOKIE};
+    use crate::api::types::{
+        EndpointsTemplate, LoginTemplate, SessionRequest, SettingsTemplate, SESSION_COOKIE,
+    };
+    use crate::context::{initialize_kv, CommonContext};
+    use askama::Template;
+    use axum::http::HeaderValue;
     use axum::{
         extract::Json,
         http::header::{COOKIE, SET_COOKIE},
     };
-    use axum::http::HeaderValue;
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
 
@@ -173,5 +187,46 @@ mod tests {
         let rendered = String::from_utf8(body_bytes.into()).expect("body utf8");
         assert!(rendered.contains("Dashboard"));
         assert!(rendered.contains("hx-get=\"/api/dashboard/endpoints\""));
+        assert!(rendered.contains("/static/vendor/htmx.min.js"));
+        assert!(!rendered.contains("unpkg.com"));
+    }
+
+    #[test]
+    fn login_template_uses_local_assets_and_valid_copy() {
+        let rendered = LoginTemplate.render().expect("login template renders");
+
+        assert!(rendered.contains("/static/vendor/htmx.min.js"));
+        assert!(rendered.contains("/static/vendor/json-enc.js"));
+        assert!(rendered.contains("Sign in to manage gateway endpoints and access keys."));
+        assert!(!rendered.contains("unpkg.com"));
+        assert!(!rendered.contains("anymore./p>"));
+    }
+
+    #[test]
+    fn settings_template_links_to_endpoints() {
+        let rendered = SettingsTemplate
+            .render()
+            .expect("settings template renders");
+
+        assert!(rendered.contains("href=\"/endpoints\""));
+        assert!(rendered.contains("data-page=\"endpoints\""));
+        assert!(rendered.contains("/static/vendor/htmx.min.js"));
+        assert!(rendered.contains("/static/vendor/json-enc.js"));
+        assert!(!rendered.contains("href=\"/nodes\""));
+        assert!(!rendered.contains("data-page=\"nodes\""));
+        assert!(!rendered.contains("unpkg.com"));
+    }
+
+    #[test]
+    fn endpoints_template_has_resilient_copy_handler() {
+        let rendered = EndpointsTemplate
+            .render()
+            .expect("endpoints template renders");
+
+        assert!(rendered.contains("onclick=\"copyKey(this)\""));
+        assert!(rendered.contains("Copy failed"));
+        assert!(rendered.contains("/static/vendor/htmx.min.js"));
+        assert!(!rendered.contains("event.target"));
+        assert!(!rendered.contains("unpkg.com"));
     }
 }

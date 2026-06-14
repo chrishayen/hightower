@@ -24,7 +24,10 @@ The main Hightower CLI tool with multiple subcommands:
 
 ```bash
 # Run STUN server
-ht stun --bind 0.0.0.0:3478
+ht stun-server --bind 0.0.0.0:3478
+
+# Query STUN server
+ht stun 127.0.0.1:3478
 
 # Run gateway server
 ht gateway

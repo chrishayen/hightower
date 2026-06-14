@@ -1116,6 +1116,7 @@ dependencies = [
  "ctrlc",
  "hightower-client",
  "hightower-gateway",
+ "hightower-node",
  "hightower-stun",
  "tokio",
  "url",

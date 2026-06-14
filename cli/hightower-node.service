@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ht node
+ExecStart=/usr/bin/ht node --kv /var/lib/hightower/node/db
 Restart=on-failure
 RestartSec=5
 User=hightower

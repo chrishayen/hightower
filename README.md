@@ -135,7 +135,7 @@ The gateway exposes:
 ## Running a STUN server
 
 ```bash
-cargo run -p hightower-cli --bin ht -- run stun --bind 0.0.0.0:3478
+cargo run -p hightower-cli --bin ht -- stun-server --bind 0.0.0.0:3478
 ```
 
 Query a STUN server:

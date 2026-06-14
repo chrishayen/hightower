@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 client = { package = "hightower-client", path = "../client" }
 gateway = { package = "hightower-gateway", path = "../gateway" }
+node = { package = "hightower-node", path = "../node" }
 stun = { package = "hightower-stun", path = "../stun" }
 clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1.0"
