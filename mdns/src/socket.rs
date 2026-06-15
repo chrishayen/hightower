@@ -1,8 +1,8 @@
+use socket2::{Domain, Protocol, Socket, Type};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
+use crate::constants::{MDNS_MULTICAST_ADDR, MDNS_PORT};
 
 /// Create a UDP socket for sending mDNS packets
 pub fn create_send_socket() -> io::Result<Socket> {

@@ -15,21 +15,21 @@ pub const MESSAGE_TRANSPORT_DATA: u8 = 4;
 #[derive(Debug, Clone)]
 pub struct HandshakeInitiation {
     /// Message type (always MESSAGE_HANDSHAKE_INITIATION)
-    pub message_type: u8,             // 1 byte
+    pub message_type: u8, // 1 byte
     /// Reserved bytes for alignment
-    pub reserved: [u8; 3],            // 3 bytes
+    pub reserved: [u8; 3], // 3 bytes
     /// Sender's session identifier
-    pub sender: u32,                  // 4 bytes
+    pub sender: u32, // 4 bytes
     /// Initiator's ephemeral public key
-    pub ephemeral: PublicKey25519,    // 32 bytes
+    pub ephemeral: PublicKey25519, // 32 bytes
     /// Encrypted static public key (32 bytes + 16 byte auth tag)
-    pub static_encrypted: Vec<u8>,    // 48 bytes (32 + 16 for auth tag)
+    pub static_encrypted: Vec<u8>, // 48 bytes (32 + 16 for auth tag)
     /// Encrypted timestamp for replay protection (12 bytes + 16 byte auth tag)
     pub timestamp_encrypted: Vec<u8>, // 28 bytes (12 + 16 for auth tag)
     /// Message authentication code for cookie mechanism
-    pub mac1: [u8; 16],               // 16 bytes
+    pub mac1: [u8; 16], // 16 bytes
     /// Optional MAC for DoS protection
-    pub mac2: [u8; 16],               // 16 bytes
+    pub mac2: [u8; 16], // 16 bytes
 }
 
 /// Second message in the WireGuard handshake (responder to initiator)
@@ -38,21 +38,21 @@ pub struct HandshakeInitiation {
 #[derive(Debug, Clone)]
 pub struct HandshakeResponse {
     /// Message type (always MESSAGE_HANDSHAKE_RESPONSE)
-    pub message_type: u8,          // 1 byte
+    pub message_type: u8, // 1 byte
     /// Reserved bytes for alignment
-    pub reserved: [u8; 3],         // 3 bytes
+    pub reserved: [u8; 3], // 3 bytes
     /// Sender's session identifier
-    pub sender: u32,               // 4 bytes
+    pub sender: u32, // 4 bytes
     /// Receiver's session identifier (from initiation message)
-    pub receiver: u32,             // 4 bytes
+    pub receiver: u32, // 4 bytes
     /// Responder's ephemeral public key
     pub ephemeral: PublicKey25519, // 32 bytes
     /// Encrypted empty payload (0 bytes + 16 byte auth tag)
-    pub empty_encrypted: Vec<u8>,  // 16 bytes (0 + 16 for auth tag)
+    pub empty_encrypted: Vec<u8>, // 16 bytes (0 + 16 for auth tag)
     /// Message authentication code for cookie mechanism
-    pub mac1: [u8; 16],            // 16 bytes
+    pub mac1: [u8; 16], // 16 bytes
     /// Optional MAC for DoS protection
-    pub mac2: [u8; 16],            // 16 bytes
+    pub mac2: [u8; 16], // 16 bytes
 }
 
 /// Encrypted data packet sent through the tunnel
@@ -61,15 +61,15 @@ pub struct HandshakeResponse {
 #[derive(Debug, Clone)]
 pub struct TransportData {
     /// Message type (always MESSAGE_TRANSPORT_DATA)
-    pub message_type: u8,  // 1 byte
+    pub message_type: u8, // 1 byte
     /// Reserved bytes for alignment
     pub reserved: [u8; 3], // 3 bytes
     /// Receiver's session identifier
-    pub receiver: u32,     // 4 bytes
+    pub receiver: u32, // 4 bytes
     /// Packet counter for replay protection
-    pub counter: u64,      // 8 bytes
+    pub counter: u64, // 8 bytes
     /// Encrypted packet data
-    pub packet: Vec<u8>,   // variable length
+    pub packet: Vec<u8>, // variable length
 }
 
 /// Cookie reply message for DoS protection
@@ -78,15 +78,15 @@ pub struct TransportData {
 #[derive(Debug, Clone)]
 pub struct CookieReply {
     /// Message type (always MESSAGE_COOKIE_REPLY)
-    pub message_type: u8,  // 1 byte
+    pub message_type: u8, // 1 byte
     /// Reserved bytes for alignment
     pub reserved: [u8; 3], // 3 bytes
     /// Receiver's session identifier
-    pub receiver: u32,     // 4 bytes
+    pub receiver: u32, // 4 bytes
     /// Nonce for cookie encryption
-    pub nonce: [u8; 24],   // 24 bytes
+    pub nonce: [u8; 24], // 24 bytes
     /// Encrypted cookie (16 bytes + 16 byte auth tag)
-    pub cookie: Vec<u8>,   // 32 bytes (16 + 16 for auth tag)
+    pub cookie: Vec<u8>, // 32 bytes (16 + 16 for auth tag)
 }
 
 impl HandshakeInitiation {
@@ -137,7 +137,10 @@ impl HandshakeInitiation {
             return Err(format!("expected 148 bytes, got {}", data.len()));
         }
         if data[0] != MESSAGE_HANDSHAKE_INITIATION {
-            return Err(format!("expected message type {}, got {}", MESSAGE_HANDSHAKE_INITIATION, data[0]));
+            return Err(format!(
+                "expected message type {}, got {}",
+                MESSAGE_HANDSHAKE_INITIATION, data[0]
+            ));
         }
 
         let mut msg = Self::new();
@@ -195,7 +198,10 @@ impl HandshakeResponse {
             return Err(format!("expected 92 bytes, got {}", data.len()));
         }
         if data[0] != MESSAGE_HANDSHAKE_RESPONSE {
-            return Err(format!("expected message type {}, got {}", MESSAGE_HANDSHAKE_RESPONSE, data[0]));
+            return Err(format!(
+                "expected message type {}, got {}",
+                MESSAGE_HANDSHAKE_RESPONSE, data[0]
+            ));
         }
 
         let mut msg = Self::new();
@@ -240,7 +246,10 @@ impl TransportData {
             return Err(format!("expected at least 16 bytes, got {}", data.len()));
         }
         if data[0] != MESSAGE_TRANSPORT_DATA {
-            return Err(format!("expected message type {}, got {}", MESSAGE_TRANSPORT_DATA, data[0]));
+            return Err(format!(
+                "expected message type {}, got {}",
+                MESSAGE_TRANSPORT_DATA, data[0]
+            ));
         }
 
         let mut msg = Self::new();
@@ -248,8 +257,7 @@ impl TransportData {
         msg.reserved.copy_from_slice(&data[1..4]);
         msg.receiver = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
         msg.counter = u64::from_le_bytes([
-            data[8], data[9], data[10], data[11],
-            data[12], data[13], data[14], data[15],
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
         ]);
         msg.packet = data[16..].to_vec();
         Ok(msg)

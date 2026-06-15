@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 mod kv {
     use kv::{
-        AuthService, Error as KvError, KvEngine, SingleNodeEngine, StoreConfig,
         command::Command,
         crypto::{AesGcmEncryptor, Argon2SecretHasher},
+        AuthService, Error as KvError, KvEngine, SingleNodeEngine, StoreConfig,
     };
     use rand::RngCore;
     use std::error::Error;
@@ -287,16 +287,15 @@ mod token {
 
         #[test]
         fn fetch_reports_missing_token() {
-            let error =
-                fetch(|_| Err(VarError::NotPresent)).expect_err("token should be missing");
+            let error = fetch(|_| Err(VarError::NotPresent)).expect_err("token should be missing");
 
             assert_eq!(error, TokenError::Missing);
         }
     }
 }
 
-pub use kv::{GatewayAuthService, KvHandle, KvInitError, initialize as initialize_kv};
-pub use token::{TokenError, fetch as fetch_token};
+pub use kv::{initialize as initialize_kv, GatewayAuthService, KvHandle, KvInitError};
+pub use token::{fetch as fetch_token, TokenError};
 
 pub const NODE_NAME_KEY: &[u8] = b"nodes/name";
 pub const HT_AUTH_KEY: &[u8] = b"secrets/ht_auth_key";
@@ -389,10 +388,7 @@ impl NamespacedKv {
         self.inner.auth()
     }
 
-    pub fn list_by_prefix(
-        &self,
-        prefix: &[u8],
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ::kv::Error> {
+    pub fn list_by_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ::kv::Error> {
         let full_prefix = match self.prefixed_key(prefix) {
             Cow::Borrowed(bytes) => bytes.to_vec(),
             Cow::Owned(bytes) => bytes,
@@ -473,7 +469,9 @@ pub fn initialize_with_token(
     context.kv.put_secret(HT_AUTH_KEY, token.as_bytes());
 
     if let Ok(gateway_url) = std::env::var(GATEWAY_URL_ENV) {
-        context.kv.put_secret(GATEWAY_URL_KEY, gateway_url.as_bytes());
+        context
+            .kv
+            .put_secret(GATEWAY_URL_KEY, gateway_url.as_bytes());
     }
 
     bootstrap_default_user(&context).map_err(ContextError::Auth)?;
@@ -491,11 +489,27 @@ fn bootstrap_default_user(context: &CommonContext) -> Result<(), ::kv::Error> {
         return Ok(());
     }
 
-    let password = std::env::var(DEFAULT_AUTH_PASSWORD_ENV)
-        .unwrap_or_else(|_| DEFAULT_AUTH_PASSWORD.to_string());
+    let password = match std::env::var(DEFAULT_AUTH_PASSWORD_ENV) {
+        Ok(password) => password,
+        Err(std::env::VarError::NotPresent) => {
+            tracing::warn!(
+                "Skipping default auth bootstrap; set HT_DEFAULT_PASSWORD to create the initial console user"
+            );
+            return Ok(());
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            tracing::warn!("Skipping default auth bootstrap; HT_DEFAULT_PASSWORD is invalid");
+            return Ok(());
+        }
+    };
 
     if password.trim().is_empty() {
         tracing::warn!("Skipping default auth bootstrap; password is empty");
+        return Ok(());
+    }
+
+    if password == DEFAULT_AUTH_PASSWORD {
+        tracing::warn!("Skipping default auth bootstrap; refusing insecure default password");
         return Ok(());
     }
 
@@ -514,7 +528,7 @@ fn bootstrap_default_user(context: &CommonContext) -> Result<(), ::kv::Error> {
 
 #[cfg(test)]
 pub mod fixtures {
-    use crate::context::{CommonContext, initialize_kv};
+    use crate::context::{initialize_kv, CommonContext};
     use tempfile::TempDir;
 
     pub fn context() -> CommonContext {
@@ -602,14 +616,19 @@ pub mod env {
 mod tests {
     use super::*;
     use std::env::VarError;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn test_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn initialize_with_token_source_persists_token() {
         let temp = TempDir::new().expect("tempdir");
-        let context =
-            initialize_with_token_source(Some(temp.path()), |_| Ok("test-auth".into()))
-                .expect("initialize");
+        let context = initialize_with_token_source(Some(temp.path()), |_| Ok("test-auth".into()))
+            .expect("initialize");
 
         let stored = context
             .kv
@@ -628,32 +647,23 @@ mod tests {
 
     #[test]
     fn initialize_with_token_bootstraps_default_user() {
-        use std::sync::{Mutex, OnceLock};
-
-        fn env_lock() -> &'static Mutex<()> {
-            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-            LOCK.get_or_init(|| Mutex::new(()))
-        }
-
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = test_env_lock().lock().expect("env lock");
 
         let previous_user = std::env::var(DEFAULT_AUTH_USERNAME_ENV).ok();
         let previous_password = std::env::var(DEFAULT_AUTH_PASSWORD_ENV).ok();
         unsafe {
             std::env::remove_var(DEFAULT_AUTH_USERNAME_ENV);
-            std::env::remove_var(DEFAULT_AUTH_PASSWORD_ENV);
+            std::env::set_var(DEFAULT_AUTH_PASSWORD_ENV, "configured-admin-password");
         }
 
         let temp = TempDir::new().expect("tempdir");
-        let context = initialize_with_token(Some(temp.path()), "token".into())
-            .expect("context initialized");
+        let context =
+            initialize_with_token(Some(temp.path()), "token".into()).expect("context initialized");
 
-        assert!(
-            context
-                .auth
-                .verify_password(DEFAULT_AUTH_USERNAME, DEFAULT_AUTH_PASSWORD)
-                .expect("default password verification")
-        );
+        assert!(context
+            .auth
+            .verify_password(DEFAULT_AUTH_USERNAME, "configured-admin-password")
+            .expect("default password verification"));
 
         match previous_user {
             Some(value) => unsafe { std::env::set_var(DEFAULT_AUTH_USERNAME_ENV, value) },
@@ -682,6 +692,8 @@ mod tests {
 
     #[test]
     fn disable_gateway_registration_sets_env() {
+        let _test_lock = test_env_lock().lock().expect("test env lock");
+
         {
             let _guard = env::disable_gateway_registration();
             let value = std::env::var(env::DISABLE_GATEWAY_REGISTRATION_ENV).unwrap();
@@ -693,13 +705,6 @@ mod tests {
 
     #[test]
     fn enable_gateway_registration_restores_previous_state() {
-        use std::sync::{Mutex, OnceLock};
-
-        fn test_env_lock() -> &'static Mutex<()> {
-            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-            LOCK.get_or_init(|| Mutex::new(()))
-        }
-
         let _test_lock = test_env_lock().lock().expect("test env lock");
 
         let previous = std::env::var(env::DISABLE_GATEWAY_REGISTRATION_ENV).ok();
@@ -721,7 +726,9 @@ mod tests {
         assert_eq!(restored, "1");
 
         match previous {
-            Some(value) => unsafe { std::env::set_var(env::DISABLE_GATEWAY_REGISTRATION_ENV, value) },
+            Some(value) => unsafe {
+                std::env::set_var(env::DISABLE_GATEWAY_REGISTRATION_ENV, value)
+            },
             None => unsafe { std::env::remove_var(env::DISABLE_GATEWAY_REGISTRATION_ENV) },
         }
     }

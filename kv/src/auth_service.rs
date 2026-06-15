@@ -552,7 +552,10 @@ mod tests {
         let result = auth2.verify_password("testuser", "password123");
 
         // This test currently fails but should pass after the fix
-        assert!(result.is_ok(), "Second auth service should be able to verify password");
+        assert!(
+            result.is_ok(),
+            "Second auth service should be able to verify password"
+        );
         assert!(result.unwrap(), "Password should be verified successfully");
     }
 

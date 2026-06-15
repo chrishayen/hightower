@@ -1,6 +1,6 @@
+use super::types::RootApiError;
 use crate::certificates::NodeCertificate;
 use crate::context::{CommonContext, NamespacedKv, GATEWAY_CERTIFICATE_KEY};
-use super::types::RootApiError;
 
 pub(crate) fn persist_certificate(context: &CommonContext, certificate: &NodeCertificate) {
     let payload = serde_json::to_vec(certificate).unwrap_or_else(|err| {
@@ -28,7 +28,10 @@ pub(crate) fn load_gateway_public_key(kv: &NamespacedKv) -> Result<String, RootA
         })?;
 
     let certificate: NodeCertificate = serde_json::from_slice(&cert_bytes).map_err(|err| {
-        RootApiError::Internal(format!("failed to deserialize gateway certificate: {}", err))
+        RootApiError::Internal(format!(
+            "failed to deserialize gateway certificate: {}",
+            err
+        ))
     })?;
 
     Ok(certificate.public_key_hex())

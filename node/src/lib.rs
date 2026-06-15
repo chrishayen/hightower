@@ -1,7 +1,7 @@
 pub mod context;
 
-use context::CommonContext;
 use client::HightowerConnection;
+use context::CommonContext;
 use tracing::{debug, error};
 
 pub async fn run(context: &CommonContext) -> Result<HightowerConnection, String> {

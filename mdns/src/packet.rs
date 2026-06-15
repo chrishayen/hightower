@@ -240,7 +240,8 @@ pub fn parse_mdns_response(packet: &[u8]) -> Option<(String, Ipv4Addr)> {
                 if offset_pos + offset_len > packet.len() {
                     return None;
                 }
-                if let Ok(label) = std::str::from_utf8(&packet[offset_pos..offset_pos + offset_len]) {
+                if let Ok(label) = std::str::from_utf8(&packet[offset_pos..offset_pos + offset_len])
+                {
                     name_parts.push(label.to_string());
                 }
                 offset_pos += offset_len;
@@ -301,7 +302,12 @@ pub fn parse_mdns_response(packet: &[u8]) -> Option<(String, Ipv4Addr)> {
         return None;
     }
 
-    let ip = Ipv4Addr::new(packet[pos], packet[pos + 1], packet[pos + 2], packet[pos + 3]);
+    let ip = Ipv4Addr::new(
+        packet[pos],
+        packet[pos + 1],
+        packet[pos + 2],
+        packet[pos + 3],
+    );
 
     Some((name_parts.join("."), ip))
 }

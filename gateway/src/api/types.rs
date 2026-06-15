@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 pub(crate) const ENDPOINT_REGISTRATION_PREFIX: &str = "endpoints/registry";
 pub(crate) const ENDPOINT_TOKEN_PREFIX: &str = "endpoints/tokens";
 pub(crate) const AUTH_HEADER: &str = "x-ht-auth";
+pub(crate) const ENDPOINT_AUTH_HEADER: &str = "x-ht-endpoint-token";
 pub(crate) const SESSION_NAMESPACE: &[u8] = b"sessions";
 pub(crate) const SESSION_COOKIE: &str = "ht_session";
 pub(crate) const CONNECTION_INTENT_PREFIX: &str = "connections/intents";

@@ -92,10 +92,7 @@ impl AcmeClient {
                 .ok_or_else(|| "No HTTP-01 challenge found".to_string())?;
 
             let token = challenge.token.as_str();
-            let key_auth = order
-                .key_authorization(challenge)
-                .as_str()
-                .to_string();
+            let key_auth = order.key_authorization(challenge).as_str().to_string();
 
             info!(domain = %domain, token = %token, key_auth = %key_auth,
                   challenge_url = %challenge.url, "Setting up HTTP-01 challenge");
@@ -276,7 +273,10 @@ impl AcmeClient {
         // Create new account
         info!("Creating new ACME account");
         let email_string = self.email.as_ref().map(|e| format!("mailto:{}", e));
-        let contact: Vec<&str> = email_string.as_ref().map(|s| vec![s.as_str()]).unwrap_or_default();
+        let contact: Vec<&str> = email_string
+            .as_ref()
+            .map(|s| vec![s.as_str()])
+            .unwrap_or_default();
 
         let (account, credentials) = Account::create(
             &NewAccount {
@@ -312,15 +312,13 @@ impl AcmeClient {
         let certs_kv = kv.clone_with_additional_prefix(ACME_CERT_PREFIX);
 
         match certs_kv.get_bytes(domain.as_bytes()) {
-            Ok(Some(cert_bytes)) => {
-                match serde_json::from_slice::<AcmeCertificate>(&cert_bytes) {
-                    Ok(cert) => Ok(Some(cert)),
-                    Err(err) => {
-                        warn!(domain = %domain, ?err, "Failed to deserialize cached certificate");
-                        Ok(None)
-                    }
+            Ok(Some(cert_bytes)) => match serde_json::from_slice::<AcmeCertificate>(&cert_bytes) {
+                Ok(cert) => Ok(Some(cert)),
+                Err(err) => {
+                    warn!(domain = %domain, ?err, "Failed to deserialize cached certificate");
+                    Ok(None)
                 }
-            }
+            },
             Ok(None) => Ok(None),
             Err(err) => Err(format!("Failed to read cached certificate: {}", err)),
         }
@@ -346,7 +344,9 @@ impl AcmeClient {
             .unwrap_or(Duration::from_secs(0))
             .as_secs();
 
-        let renewal_threshold = cert.expires_at.saturating_sub(CERT_RENEWAL_DAYS * 24 * 60 * 60);
+        let renewal_threshold = cert
+            .expires_at
+            .saturating_sub(CERT_RENEWAL_DAYS * 24 * 60 * 60);
         now >= renewal_threshold
     }
 

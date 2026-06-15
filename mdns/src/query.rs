@@ -1,9 +1,9 @@
+use socket2::Socket;
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use socket2::Socket;
 use tokio::sync::mpsc;
 
-use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
+use crate::constants::{MDNS_MULTICAST_ADDR, MDNS_PORT};
 use crate::packet::{build_mdns_packet, build_mdns_query, parse_mdns_query, parse_mdns_response};
 use crate::MdnsResponse;
 
@@ -38,16 +38,22 @@ pub async fn query(socket: &Socket, hostname: &str, domain: &str) {
 /// * `ip` - The IP address to advertise for this host
 /// * `discoveries` - Channel to send newly discovered peers to
 /// * `responses` - Channel to send all mDNS responses to (including discoveries)
-pub async fn listen(socket: &Socket, send_socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, discoveries: mpsc::Sender<MdnsResponse>, responses: mpsc::Sender<MdnsResponse>) {
+pub async fn listen(
+    socket: &Socket,
+    send_socket: &Socket,
+    name: &str,
+    domain: &str,
+    ip: Ipv4Addr,
+    discoveries: mpsc::Sender<MdnsResponse>,
+    responses: mpsc::Sender<MdnsResponse>,
+) {
     let mut buf: [MaybeUninit<u8>; 4096] = [MaybeUninit::uninit(); 4096];
 
     loop {
         match socket.recv_from(&mut buf) {
             Ok((len, _addr)) => {
                 // Safety: recv_from initializes the bytes it reads
-                let data = unsafe {
-                    std::slice::from_raw_parts(buf.as_ptr() as *const u8, len)
-                };
+                let data = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, len) };
 
                 // Check for queries
                 if let Some(query_name) = parse_mdns_query(data) {

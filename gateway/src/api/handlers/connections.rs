@@ -9,7 +9,9 @@ use super::super::types::{
     ApiState, ConnectionIntent, ConnectionIntentRequest, ConnectionIntentResponse, RootApiError,
     CONNECTION_INTENT_PREFIX,
 };
-use super::endpoints::{load_registration, resolve_registration_by_id_or_ip, validate_auth};
+use super::endpoints::{
+    load_registration, resolve_registration_by_id_or_ip, validate_auth, validate_endpoint_token,
+};
 
 pub(crate) async fn create_connection_intent(
     State(state): State<ApiState>,
@@ -23,6 +25,7 @@ pub(crate) async fn create_connection_intent(
     };
 
     validate_auth(&kv, &headers)?;
+    validate_endpoint_token(&kv, &headers, &initiator_endpoint_id)?;
 
     let initiator = load_registration(&kv, &initiator_endpoint_id)?;
     let target = resolve_registration_by_id_or_ip(&kv, &body.target)?;
@@ -68,6 +71,7 @@ pub(crate) async fn get_pending_connection_intents(
     };
 
     validate_auth(&kv, &headers)?;
+    validate_endpoint_token(&kv, &headers, &endpoint_id)?;
     // Confirm endpoint exists so typoed IDs do not silently return an empty list.
     let _ = load_registration(&kv, &endpoint_id)?;
 
@@ -168,7 +172,7 @@ mod tests {
     use crate::api::certificates::persist_certificate;
     use crate::api::handlers::auth_keys::store_legacy_key;
     use crate::api::handlers::endpoints::register_endpoint;
-    use crate::api::types::{EndpointRegistrationRequest, AUTH_HEADER};
+    use crate::api::types::{EndpointRegistrationRequest, AUTH_HEADER, ENDPOINT_AUTH_HEADER};
     use crate::context::{initialize_kv, CommonContext};
     use axum::http::{HeaderName, HeaderValue};
     use std::sync::{Arc, RwLock};
@@ -179,6 +183,15 @@ mod tests {
         headers.insert(
             HeaderName::from_lowercase(AUTH_HEADER.as_bytes()).expect("static header"),
             HeaderValue::from_static("super-secret"),
+        );
+        headers
+    }
+
+    fn endpoint_headers(token: &str) -> HeaderMap {
+        let mut headers = headers();
+        headers.insert(
+            HeaderName::from_lowercase(ENDPOINT_AUTH_HEADER.as_bytes()).expect("static header"),
+            HeaderValue::from_str(token).expect("endpoint token header"),
         );
         headers
     }
@@ -222,7 +235,7 @@ mod tests {
         let response = create_connection_intent(
             State(state.clone()),
             AxumPath(initiator.endpoint_id.clone()),
-            headers.clone(),
+            endpoint_headers(&initiator.token),
             Json(ConnectionIntentRequest {
                 target: target.endpoint_id.clone(),
                 port: 8080,
@@ -245,7 +258,7 @@ mod tests {
         let pending = get_pending_connection_intents(
             State(state.clone()),
             AxumPath(target.endpoint_id.clone()),
-            headers.clone(),
+            endpoint_headers(&target.token),
         )
         .await
         .expect("pending lookup")
@@ -260,11 +273,44 @@ mod tests {
         let pending_again = get_pending_connection_intents(
             State(state),
             AxumPath(target.endpoint_id.clone()),
-            headers,
+            endpoint_headers(&target.token),
         )
         .await
         .expect("second pending lookup")
         .0;
         assert!(pending_again.is_empty());
+    }
+
+    #[tokio::test]
+    async fn connection_intents_reject_mismatched_endpoint_token() {
+        let (state, headers) = setup().await;
+        let initiator = register_endpoint(State(state.clone()), headers.clone(), Json(body('a')))
+            .await
+            .expect("register initiator")
+            .0;
+        let target = register_endpoint(State(state.clone()), headers, Json(body('b')))
+            .await
+            .expect("register target")
+            .0;
+
+        let create_response = create_connection_intent(
+            State(state.clone()),
+            AxumPath(initiator.endpoint_id.clone()),
+            endpoint_headers(&target.token),
+            Json(ConnectionIntentRequest {
+                target: target.endpoint_id.clone(),
+                port: 8080,
+            }),
+        )
+        .await;
+        assert!(matches!(create_response, Err(RootApiError::Unauthorized)));
+
+        let pending_response = get_pending_connection_intents(
+            State(state),
+            AxumPath(target.endpoint_id),
+            endpoint_headers(&initiator.token),
+        )
+        .await;
+        assert!(matches!(pending_response, Err(RootApiError::Unauthorized)));
     }
 }

@@ -1,4 +1,7 @@
-use axum::{body::Body, http::{Request, StatusCode}};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 
 pub(crate) async fn root_health(_request: Request<Body>) -> StatusCode {
     StatusCode::OK

@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod transport_security_tests {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 

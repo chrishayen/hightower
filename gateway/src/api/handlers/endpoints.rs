@@ -9,7 +9,7 @@ use tracing::debug;
 use super::super::certificates::load_gateway_public_key;
 use super::super::types::{
     ApiState, EndpointRegistrationRequest, EndpointRegistrationResponse, RootApiError, AUTH_HEADER,
-    ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
+    ENDPOINT_AUTH_HEADER, ENDPOINT_REGISTRATION_PREFIX, ENDPOINT_TOKEN_PREFIX,
 };
 use crate::context::NamespacedKv;
 use crate::ip_allocator::IpAllocator;
@@ -248,6 +248,31 @@ pub(crate) fn validate_auth(kv: &NamespacedKv, headers: &HeaderMap) -> Result<()
     } else {
         Err(RootApiError::Unauthorized)
     }
+}
+
+pub(crate) fn validate_endpoint_token(
+    kv: &NamespacedKv,
+    headers: &HeaderMap,
+    endpoint_id: &str,
+) -> Result<(), RootApiError> {
+    let header_name = HeaderName::from_lowercase(ENDPOINT_AUTH_HEADER.as_bytes())
+        .expect("static header name is valid lowercase");
+    let provided = headers
+        .get(&header_name)
+        .and_then(|value| value.to_str().ok())
+        .ok_or(RootApiError::Unauthorized)?;
+
+    let token_key = token_storage_key(provided);
+    let stored_endpoint_id = kv
+        .get_bytes(&token_key)
+        .map_err(|err| RootApiError::Storage(format!("failed to read endpoint token: {}", err)))?
+        .ok_or(RootApiError::Unauthorized)?;
+
+    if stored_endpoint_id == b"__DELETED__" || stored_endpoint_id != endpoint_id.as_bytes() {
+        return Err(RootApiError::Unauthorized);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn load_registration(

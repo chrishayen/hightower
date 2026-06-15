@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+/// WireGuard connection implementation (UDP-based Connection and Stream)
+#[cfg(feature = "transport")]
+pub mod connection;
 /// Cryptographic primitives for WireGuard protocol
 pub mod crypto;
 /// Handshake initiator implementation
@@ -12,9 +15,6 @@ pub mod protocol;
 pub mod replay;
 /// Handshake responder implementation
 pub mod responder;
-/// WireGuard connection implementation (UDP-based Connection and Stream)
-#[cfg(feature = "transport")]
-pub mod connection;
 
 /// Errors that can occur during WireGuard protocol operations
 #[derive(Error, Debug)]
@@ -229,5 +229,39 @@ mod tests {
         assert!(bob.check_replay(session_id, 500).is_err()); // Too old
 
         println!("Replay protection test successful!");
+    }
+
+    #[test]
+    fn test_handshake_initiation_replay_rejected() {
+        let (alice_private, alice_public) = dh_generate();
+        let (bob_private, bob_public) = dh_generate();
+
+        let mut alice = WireGuardProtocol::new(Some(alice_private));
+        let mut bob = WireGuardProtocol::new(Some(bob_private));
+
+        alice.add_peer(PeerInfo {
+            public_key: bob_public,
+            preshared_key: None,
+            endpoint: None,
+            allowed_ips: Vec::new(),
+            persistent_keepalive: None,
+        });
+
+        bob.add_peer(PeerInfo {
+            public_key: alice_public,
+            preshared_key: None,
+            endpoint: None,
+            allowed_ips: Vec::new(),
+            persistent_keepalive: None,
+        });
+
+        let initiation = alice.initiate_handshake(&bob_public).unwrap();
+        bob.process_initiation(&initiation).unwrap();
+
+        let replay = bob
+            .process_initiation(&initiation)
+            .expect_err("replayed initiation is rejected");
+        assert!(matches!(replay, WireGuardError::ProtocolError(_)));
+        assert!(replay.to_string().contains("Stale handshake initiation"));
     }
 }

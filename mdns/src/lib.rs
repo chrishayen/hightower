@@ -4,14 +4,14 @@ mod packet;
 mod query;
 mod socket;
 
+use socket2::Socket;
 use std::io;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
-use socket2::Socket;
 use tokio::sync::mpsc;
 
-use socket::{create_send_socket, create_recv_socket};
+use socket::{create_recv_socket, create_send_socket};
 
 /// Response from an mDNS query or discovery
 #[derive(Debug, Clone, PartialEq)]
@@ -80,18 +80,38 @@ impl Mdns {
     /// * `name` - The mDNS name to advertise (without domain suffix)
     /// * `ip` - The local IPv4 address to advertise
     /// * `interval` - Time between broadcasts (default is 120 seconds per RFC 6762)
-    pub fn with_interval<S: Into<String>>(name: S, ip: Ipv4Addr, interval: Duration) -> io::Result<Self> {
+    pub fn with_interval<S: Into<String>>(
+        name: S,
+        ip: Ipv4Addr,
+        interval: Duration,
+    ) -> io::Result<Self> {
         let send_socket = create_send_socket()?;
         let recv_socket = create_recv_socket()?;
 
-        Ok(Self {
+        Ok(Self::with_sockets(
+            name,
+            ip,
+            interval,
+            send_socket,
+            recv_socket,
+        ))
+    }
+
+    fn with_sockets<S: Into<String>>(
+        name: S,
+        ip: Ipv4Addr,
+        interval: Duration,
+        send_socket: Socket,
+        recv_socket: Socket,
+    ) -> Self {
+        Self {
             name: name.into(),
             domain: "local".to_string(),
             broadcast_interval: interval,
             send_socket: Arc::new(send_socket),
             recv_socket: Arc::new(recv_socket),
             local_ip: ip,
-        })
+        }
     }
 
     /// Set a custom domain (default is "local")
@@ -135,7 +155,14 @@ impl Mdns {
         let name_clone = name.clone();
         let domain_clone = domain.clone();
         tokio::spawn(async move {
-            broadcast::broadcast_loop(&send_socket_clone, &name_clone, &domain_clone, local_ip, broadcast_interval).await;
+            broadcast::broadcast_loop(
+                &send_socket_clone,
+                &name_clone,
+                &domain_clone,
+                local_ip,
+                broadcast_interval,
+            )
+            .await;
         });
 
         // Spawn listen task
@@ -143,7 +170,16 @@ impl Mdns {
         let name_clone = name.clone();
         let domain_clone = domain.clone();
         tokio::spawn(async move {
-            query::listen(&recv_socket, &send_socket_clone, &name_clone, &domain_clone, local_ip, disc_tx, resp_tx).await;
+            query::listen(
+                &recv_socket,
+                &send_socket_clone,
+                &name_clone,
+                &domain_clone,
+                local_ip,
+                disc_tx,
+                resp_tx,
+            )
+            .await;
         });
 
         MdnsHandle {
@@ -171,11 +207,22 @@ impl Mdns {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use socket2::{Domain, Protocol, Type};
+
+    fn test_socket() -> Socket {
+        Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).expect("test socket")
+    }
 
     #[test]
     fn test_new_with_name() {
         let ip = Ipv4Addr::new(192, 168, 1, 100);
-        let mdns = Mdns::new("myhost", ip).unwrap();
+        let mdns = Mdns::with_sockets(
+            "myhost",
+            ip,
+            Duration::from_secs(120),
+            test_socket(),
+            test_socket(),
+        );
         assert_eq!(mdns.name(), "myhost");
         assert_eq!(mdns.local_ip(), ip);
         assert_eq!(mdns.broadcast_interval(), Duration::from_secs(120));
@@ -184,7 +231,13 @@ mod tests {
     #[test]
     fn test_with_custom_interval() {
         let ip = Ipv4Addr::new(10, 0, 0, 5);
-        let mdns = Mdns::with_interval("myhost", ip, Duration::from_secs(60)).unwrap();
+        let mdns = Mdns::with_sockets(
+            "myhost",
+            ip,
+            Duration::from_secs(60),
+            test_socket(),
+            test_socket(),
+        );
         assert_eq!(mdns.name(), "myhost");
         assert_eq!(mdns.local_ip(), ip);
         assert_eq!(mdns.broadcast_interval(), Duration::from_secs(60));

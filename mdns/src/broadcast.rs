@@ -1,14 +1,20 @@
-use std::net::{IpAddr, SocketAddr};
-use std::net::Ipv4Addr;
 use socket2::Socket;
-use tokio::time;
+use std::net::Ipv4Addr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
+use tokio::time;
 
-use crate::constants::{MDNS_PORT, MDNS_MULTICAST_ADDR};
-use crate::packet::{build_mdns_packet, build_goodbye_packet};
+use crate::constants::{MDNS_MULTICAST_ADDR, MDNS_PORT};
+use crate::packet::{build_goodbye_packet, build_mdns_packet};
 
 /// Continuously broadcast mDNS announcements
-pub async fn broadcast_loop(socket: &Socket, name: &str, domain: &str, ip: Ipv4Addr, interval: Duration) {
+pub async fn broadcast_loop(
+    socket: &Socket,
+    name: &str,
+    domain: &str,
+    ip: Ipv4Addr,
+    interval: Duration,
+) {
     let mut interval = time::interval(interval);
 
     loop {

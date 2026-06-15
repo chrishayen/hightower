@@ -533,11 +533,27 @@ pub mod context {
             return Ok(());
         }
 
-        let password = std::env::var(DEFAULT_AUTH_PASSWORD_ENV)
-            .unwrap_or_else(|_| DEFAULT_AUTH_PASSWORD.to_string());
+        let password = match std::env::var(DEFAULT_AUTH_PASSWORD_ENV) {
+            Ok(password) => password,
+            Err(std::env::VarError::NotPresent) => {
+                tracing::warn!(
+                    "Skipping default auth bootstrap; set HT_DEFAULT_PASSWORD to create the initial console user"
+                );
+                return Ok(());
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                tracing::warn!("Skipping default auth bootstrap; HT_DEFAULT_PASSWORD is invalid");
+                return Ok(());
+            }
+        };
 
         if password.trim().is_empty() {
             tracing::warn!("Skipping default auth bootstrap; password is empty");
+            return Ok(());
+        }
+
+        if password == DEFAULT_AUTH_PASSWORD {
+            tracing::warn!("Skipping default auth bootstrap; refusing insecure default password");
             return Ok(());
         }
 
@@ -607,7 +623,7 @@ pub mod context {
             let previous_password = std::env::var(DEFAULT_AUTH_PASSWORD_ENV).ok();
             unsafe {
                 std::env::remove_var(DEFAULT_AUTH_USERNAME_ENV);
-                std::env::remove_var(DEFAULT_AUTH_PASSWORD_ENV);
+                std::env::set_var(DEFAULT_AUTH_PASSWORD_ENV, "configured-admin-password");
             }
 
             let temp = TempDir::new().expect("tempdir");
@@ -616,7 +632,7 @@ pub mod context {
 
             assert!(context
                 .auth
-                .verify_password(DEFAULT_AUTH_USERNAME, DEFAULT_AUTH_PASSWORD)
+                .verify_password(DEFAULT_AUTH_USERNAME, "configured-admin-password")
                 .expect("default password verification"));
 
             match previous_user {

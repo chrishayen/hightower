@@ -4,7 +4,11 @@ use tempfile::TempDir;
 fn main() -> hightower_kv::Result<()> {
     let temp_dir = TempDir::new()?;
     let mut config = StoreConfig::default();
-    config.data_dir = temp_dir.path().join("prefix-demo").to_string_lossy().into_owned();
+    config.data_dir = temp_dir
+        .path()
+        .join("prefix-demo")
+        .to_string_lossy()
+        .into_owned();
     config.worker_threads = 2;
 
     let engine = SingleNodeEngine::with_config(config)?;
@@ -65,7 +69,11 @@ fn main() -> hightower_kv::Result<()> {
 
     println!("\n=== Querying non-existent prefix ===");
     let missing = engine.get_prefix(b"missing:")?;
-    println!("Found {} items with prefix 'missing:': {:?}", missing.len(), missing);
+    println!(
+        "Found {} items with prefix 'missing:': {:?}",
+        missing.len(),
+        missing
+    );
 
     println!("\n=== Querying all keys (empty prefix) ===");
     let all_keys = engine.get_prefix(b"")?;

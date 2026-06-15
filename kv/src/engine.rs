@@ -327,7 +327,13 @@ impl SingleNodeEngine {
 
             // Fetch from storage if not in state
             if let Some(command) = self.shared.storage.fetch_command(&entry)? {
-                if let Command::Set { key, value, version, timestamp } = command {
+                if let Command::Set {
+                    key,
+                    value,
+                    version,
+                    timestamp,
+                } = command
+                {
                     let mut guard = self.shared.state.lock_entry(&key);
                     guard.apply(&Command::Set {
                         key: key.clone(),
@@ -846,10 +852,16 @@ mod tests {
         let cfg = temp_config(temp.path());
         let engine = SingleNodeEngine::with_config(cfg).unwrap();
 
-        engine.put(b"app:user:1".to_vec(), b"alice".to_vec()).unwrap();
+        engine
+            .put(b"app:user:1".to_vec(), b"alice".to_vec())
+            .unwrap();
         engine.put(b"app:user:2".to_vec(), b"bob".to_vec()).unwrap();
-        engine.put(b"app:session:1".to_vec(), b"s1".to_vec()).unwrap();
-        engine.put(b"other:key".to_vec(), b"value".to_vec()).unwrap();
+        engine
+            .put(b"app:session:1".to_vec(), b"s1".to_vec())
+            .unwrap();
+        engine
+            .put(b"other:key".to_vec(), b"value".to_vec())
+            .unwrap();
 
         let results = engine.get_prefix(b"app:user:").unwrap();
         assert_eq!(results.len(), 2);
@@ -870,8 +882,12 @@ mod tests {
         let cfg = temp_config(temp.path());
         let engine = SingleNodeEngine::with_config(cfg).unwrap();
 
-        engine.put(b"prefix:key1".to_vec(), b"value1".to_vec()).unwrap();
-        engine.put(b"prefix:key2".to_vec(), b"value2".to_vec()).unwrap();
+        engine
+            .put(b"prefix:key1".to_vec(), b"value1".to_vec())
+            .unwrap();
+        engine
+            .put(b"prefix:key2".to_vec(), b"value2".to_vec())
+            .unwrap();
         engine.delete(b"prefix:key1".to_vec()).unwrap();
 
         let results = engine.get_prefix(b"prefix:").unwrap();

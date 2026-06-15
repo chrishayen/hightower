@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod communication_edge_cases_tests {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -273,9 +273,15 @@ mod communication_edge_cases_tests {
         let charlie_addr = charlie.local_addr();
 
         alice.add_peer(bob_public, Some(bob_addr)).await.unwrap();
-        alice.add_peer(charlie_public, Some(charlie_addr)).await.unwrap();
+        alice
+            .add_peer(charlie_public, Some(charlie_addr))
+            .await
+            .unwrap();
         bob.add_peer(alice_public, Some(alice_addr)).await.unwrap();
-        charlie.add_peer(alice_public, Some(alice_addr)).await.unwrap();
+        charlie
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
 
         let mut bob_incoming = bob.listen().await.unwrap();
         let mut charlie_incoming = charlie.listen().await.unwrap();

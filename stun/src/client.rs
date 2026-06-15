@@ -1,4 +1,4 @@
-use crate::{StunError, StunMessage, XOR_MAPPED_ADDRESS, MAPPED_ADDRESS};
+use crate::{StunError, StunMessage, MAPPED_ADDRESS, XOR_MAPPED_ADDRESS};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 

@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod handshake_tests {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -70,11 +70,7 @@ mod handshake_tests {
 
         alice.add_peer(bob_public, Some(bob_addr)).await.unwrap();
 
-        let result = timeout(
-            Duration::from_secs(1),
-            alice.connect(bob_addr, bob_public),
-        )
-        .await;
+        let result = timeout(Duration::from_secs(1), alice.connect(bob_addr, bob_public)).await;
 
         assert!(result.is_err() || result.unwrap().is_err());
     }

@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod error_handling_tests {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -111,7 +111,10 @@ mod error_handling_tests {
         assert_eq!(bob_stream.recv().await.unwrap(), b"hello");
 
         // Update peer info (e.g., different endpoint)
-        alice.add_peer(bob_public, Some("127.0.0.1:9999".parse().unwrap())).await.unwrap();
+        alice
+            .add_peer(bob_public, Some("127.0.0.1:9999".parse().unwrap()))
+            .await
+            .unwrap();
 
         // Existing stream should still work (session persists with original endpoint)
         alice_stream.send(b"still works").await.unwrap();
@@ -190,7 +193,8 @@ mod error_handling_tests {
 
         // Can still add peers
         let (_bob_private, bob_public) = dh_generate();
-        alice.add_peer(bob_public, Some("127.0.0.1:9999".parse().unwrap()))
+        alice
+            .add_peer(bob_public, Some("127.0.0.1:9999".parse().unwrap()))
             .await
             .unwrap();
     }

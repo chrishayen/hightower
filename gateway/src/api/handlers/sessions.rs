@@ -2,15 +2,15 @@ use askama::Template;
 use axum::{
     body::Body,
     extract::{Json, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::Response,
 };
 use rand::RngCore;
 
 use super::super::types::{
-    ApiState, LoginAlertTemplate, SessionApiError, SessionRequest,
-    SESSION_COOKIE, SESSION_NAMESPACE,
+    ApiState, LoginAlertTemplate, SessionApiError, SessionRequest, SESSION_COOKIE,
+    SESSION_NAMESPACE,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -49,11 +49,10 @@ pub(crate) async fn create_session(
     let token = generate_session_token();
     persist_session(&state, &token, &username)?;
     let cookie = build_session_cookie(&token);
-    let cookie_value = HeaderValue::from_str(&cookie)
-        .map_err(|err| {
-            tracing::error!(?err, "Failed to create cookie header");
-            SessionApiError::Internal(format!("invalid cookie header: {}", err))
-        })?;
+    let cookie_value = HeaderValue::from_str(&cookie).map_err(|err| {
+        tracing::error!(?err, "Failed to create cookie header");
+        SessionApiError::Internal(format!("invalid cookie header: {}", err))
+    })?;
 
     tracing::info!(username = %username, "Session created successfully");
 
@@ -89,12 +88,15 @@ pub(crate) async fn delete_session(
         }
     }
 
-    let clear_cookie = format!("{}=; HttpOnly; Path=/; Max-Age=0", SESSION_COOKIE);
-    let cookie_value = HeaderValue::from_str(&clear_cookie)
-        .map_err(|err| {
-            tracing::error!(?err, "Failed to create clear cookie header");
-            SessionApiError::Internal(format!("invalid cookie header: {}", err))
-        })?;
+    let clear_cookie = format!(
+        "{}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0{}",
+        SESSION_COOKIE,
+        secure_cookie_suffix()
+    );
+    let cookie_value = HeaderValue::from_str(&clear_cookie).map_err(|err| {
+        tracing::error!(?err, "Failed to create clear cookie header");
+        SessionApiError::Internal(format!("invalid cookie header: {}", err))
+    })?;
 
     Response::builder()
         .status(StatusCode::SEE_OTHER)
@@ -112,7 +114,10 @@ pub(crate) async fn change_password(
     headers: HeaderMap,
     Json(body): Json<ChangePasswordRequest>,
 ) -> Result<Response, SessionApiError> {
-    let ChangePasswordRequest { current_password, new_password } = body;
+    let ChangePasswordRequest {
+        current_password,
+        new_password,
+    } = body;
 
     if current_password.is_empty() || new_password.is_empty() {
         tracing::warn!("Empty password provided");
@@ -186,12 +191,30 @@ fn generate_session_token() -> String {
 
 fn build_session_cookie(token: &str) -> String {
     format!(
-        "{}={}; HttpOnly; Path=/; SameSite=Strict; Max-Age=86400",
-        SESSION_COOKIE, token
+        "{}={}; HttpOnly; Path=/; SameSite=Strict; Max-Age=86400{}",
+        SESSION_COOKIE,
+        token,
+        secure_cookie_suffix()
     )
 }
 
-pub(crate) fn has_valid_session(state: &ApiState, headers: &HeaderMap) -> Result<bool, ::kv::Error> {
+fn secure_cookie_suffix() -> &'static str {
+    let https_disabled = std::env::var("DISABLE_HTTPS")
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    if https_disabled {
+        ""
+    } else {
+        "; Secure"
+    }
+}
+
+pub(crate) fn has_valid_session(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<bool, ::kv::Error> {
     match extract_session_token(headers) {
         Some(token) => session_exists(state, &token),
         None => Ok(false),
@@ -207,11 +230,9 @@ fn session_exists(state: &ApiState, token: &str) -> Result<bool, ::kv::Error> {
     let sessions = kv.clone_with_additional_prefix(SESSION_NAMESPACE);
     sessions
         .get_bytes(token.as_bytes())
-        .map(|value| {
-            match value {
-                Some(bytes) => bytes != b"__DELETED__",
-                None => false,
-            }
+        .map(|value| match value {
+            Some(bytes) => bytes != b"__DELETED__",
+            None => false,
         })
 }
 
@@ -251,9 +272,9 @@ fn get_session_username(state: &ApiState, headers: &HeaderMap) -> Result<String,
 
 fn build_alert_response(kind: &str, message: &str) -> Result<Response, SessionApiError> {
     let template = LoginAlertTemplate { kind, message };
-    let markup = template.render().map_err(|err| {
-        SessionApiError::Internal(format!("failed to render alert: {}", err))
-    })?;
+    let markup = template
+        .render()
+        .map_err(|err| SessionApiError::Internal(format!("failed to render alert: {}", err)))?;
 
     Response::builder()
         .status(StatusCode::OK)
@@ -267,7 +288,7 @@ fn build_alert_response(kind: &str, message: &str) -> Result<Response, SessionAp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{CommonContext, initialize_kv};
+    use crate::context::{initialize_kv, CommonContext};
     use std::sync::{Arc, RwLock};
     use tempfile::TempDir;
 
@@ -382,7 +403,10 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         let cookie = format!("{}={}", SESSION_COOKIE, session_token);
-        headers.insert(COOKIE, HeaderValue::from_str(&cookie).expect("cookie header"));
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_str(&cookie).expect("cookie header"),
+        );
 
         let body = ChangePasswordRequest {
             current_password: "old-password".into(),
@@ -428,7 +452,10 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         let cookie = format!("{}={}", SESSION_COOKIE, session_token);
-        headers.insert(COOKIE, HeaderValue::from_str(&cookie).expect("cookie header"));
+        headers.insert(
+            COOKIE,
+            HeaderValue::from_str(&cookie).expect("cookie header"),
+        );
 
         let body = ChangePasswordRequest {
             current_password: "wrong-password".into(),

@@ -2,8 +2,8 @@ use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let auth_token = std::env::var("HT_AUTH_TOKEN")
-        .expect("HT_AUTH_TOKEN environment variable must be set");
+    let auth_token =
+        std::env::var("HT_AUTH_TOKEN").expect("HT_AUTH_TOKEN environment variable must be set");
 
     println!("Connecting to gateway...");
 

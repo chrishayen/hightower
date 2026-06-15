@@ -59,6 +59,7 @@ pub struct WireGuardProtocol {
     active_sessions: HashMap<u32, ActiveSession>, // sender_id -> session
     pending_initiations: HashMap<u32, InitiatorState>, // sender_id -> state
     pending_responses: HashMap<u32, ResponderState>, // sender_id -> state
+    latest_handshake_timestamps: HashMap<PublicKey25519, [u8; 12]>,
 }
 
 impl WireGuardProtocol {
@@ -82,6 +83,7 @@ impl WireGuardProtocol {
             active_sessions: HashMap::new(),
             pending_initiations: HashMap::new(),
             pending_responses: HashMap::new(),
+            latest_handshake_timestamps: HashMap::new(),
         }
     }
 
@@ -102,6 +104,7 @@ impl WireGuardProtocol {
         // Clean up any sessions for this peer
         self.active_sessions
             .retain(|_, session| session.peer_public_key != *public_key);
+        self.latest_handshake_timestamps.remove(public_key);
     }
 
     /// Get peer info
@@ -141,12 +144,23 @@ impl WireGuardProtocol {
 
         // Process the initiation to discover the peer
         let peer_public_key = responder.process_initiation(msg)?;
+        let timestamp = responder.timestamp().ok_or_else(|| {
+            WireGuardError::ProtocolError("Missing handshake timestamp".to_string())
+        })?;
 
         // Look up peer info to get PSK if available
         let peer_info = self
             .peers
             .get(&peer_public_key)
             .ok_or_else(|| WireGuardError::ProtocolError("Unknown peer".to_string()))?;
+
+        if let Some(previous) = self.latest_handshake_timestamps.get(&peer_public_key) {
+            if timestamp <= *previous {
+                return Err(WireGuardError::ProtocolError(
+                    "Stale handshake initiation".to_string(),
+                ));
+            }
+        }
 
         // Create new responder with correct PSK
         let mut responder = ResponderState::new(self.local_private_key, peer_info.preshared_key);
@@ -171,6 +185,8 @@ impl WireGuardProtocol {
 
         // Store the active session
         self.active_sessions.insert(sender_id, session);
+        self.latest_handshake_timestamps
+            .insert(peer_public_key, timestamp);
 
         #[cfg(feature = "transport")]
         {
@@ -349,7 +365,10 @@ impl WireGuardProtocol {
     }
 
     /// Find session by peer public key
-    pub fn find_session_by_peer(&self, peer_public_key: &PublicKey25519) -> Option<(u32, &ActiveSession)> {
+    pub fn find_session_by_peer(
+        &self,
+        peer_public_key: &PublicKey25519,
+    ) -> Option<(u32, &ActiveSession)> {
         self.active_sessions
             .iter()
             .find(|(_, session)| session.peer_public_key == *peer_public_key)
@@ -357,7 +376,10 @@ impl WireGuardProtocol {
     }
 
     /// Find mutable session by peer public key
-    pub fn find_session_by_peer_mut(&mut self, peer_public_key: &PublicKey25519) -> Option<(u32, &mut ActiveSession)> {
+    pub fn find_session_by_peer_mut(
+        &mut self,
+        peer_public_key: &PublicKey25519,
+    ) -> Option<(u32, &mut ActiveSession)> {
         self.active_sessions
             .iter_mut()
             .find(|(_, session)| session.peer_public_key == *peer_public_key)

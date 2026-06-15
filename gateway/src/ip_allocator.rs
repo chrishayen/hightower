@@ -7,7 +7,7 @@ const NODE_IP_MAPPING_PREFIX: &str = "node_ips";
 // RFC 6598 Shared Address Space: 100.64.0.0/16
 // Using 100.64.0.1 - 100.64.255.254 (65,534 addresses)
 const NETWORK_BASE: u32 = 0x64400001; // 100.64.0.1
-const NETWORK_MAX: u32 = 0x6440FFFE;  // 100.64.255.254
+const NETWORK_MAX: u32 = 0x6440FFFE; // 100.64.255.254
 
 pub struct IpAllocator;
 
@@ -27,15 +27,17 @@ impl IpAllocator {
         Ok(ip)
     }
 
-    pub fn get_node_ip(kv: &NamespacedKv, node_id: &str) -> Result<Option<String>, IpAllocationError> {
+    pub fn get_node_ip(
+        kv: &NamespacedKv,
+        node_id: &str,
+    ) -> Result<Option<String>, IpAllocationError> {
         let key = Self::node_ip_key(node_id);
         match kv.get_bytes(&key) {
             Ok(Some(bytes)) => {
                 if &bytes[..] == b"__DELETED__" {
                     return Ok(None);
                 }
-                let ip = String::from_utf8(bytes)
-                    .map_err(|_| IpAllocationError::InvalidData)?;
+                let ip = String::from_utf8(bytes).map_err(|_| IpAllocationError::InvalidData)?;
                 Ok(Some(ip))
             }
             Ok(None) => Ok(None),
@@ -46,8 +48,7 @@ impl IpAllocator {
     pub fn release_ip(kv: &NamespacedKv, node_id: &str) -> Result<(), IpAllocationError> {
         let key = Self::node_ip_key(node_id);
         if let Some(ip_bytes) = kv.get_bytes(&key).map_err(IpAllocationError::Storage)? {
-            let ip = String::from_utf8(ip_bytes)
-                .map_err(|_| IpAllocationError::InvalidData)?;
+            let ip = String::from_utf8(ip_bytes).map_err(|_| IpAllocationError::InvalidData)?;
 
             // Remove the allocation
             let allocation_key = Self::ip_allocation_key(&ip);
@@ -79,7 +80,8 @@ impl IpAllocator {
 
     fn get_all_allocated_ips(kv: &NamespacedKv) -> Result<Vec<String>, IpAllocationError> {
         let prefix = format!("{}/", IP_ALLOCATIONS_PREFIX);
-        let entries = kv.list_by_prefix(prefix.as_bytes())
+        let entries = kv
+            .list_by_prefix(prefix.as_bytes())
             .map_err(IpAllocationError::Storage)?;
 
         let mut ips = Vec::new();
@@ -99,7 +101,11 @@ impl IpAllocator {
         Ok(ips)
     }
 
-    fn store_allocation(kv: &NamespacedKv, node_id: &str, ip: &str) -> Result<(), IpAllocationError> {
+    fn store_allocation(
+        kv: &NamespacedKv,
+        node_id: &str,
+        ip: &str,
+    ) -> Result<(), IpAllocationError> {
         // Store IP -> node_id mapping
         let allocation_key = Self::ip_allocation_key(ip);
         kv.put_bytes(&allocation_key, node_id.as_bytes())
@@ -195,7 +201,9 @@ mod tests {
         let ctx = CommonContext::new(kv_handle);
 
         IpAllocator::allocate_ip(&ctx.kv, "node1").expect("allocate");
-        let ip = IpAllocator::get_node_ip(&ctx.kv, "node1").expect("get").expect("ip present");
+        let ip = IpAllocator::get_node_ip(&ctx.kv, "node1")
+            .expect("get")
+            .expect("ip present");
         assert_eq!(ip, "100.64.0.1");
     }
 

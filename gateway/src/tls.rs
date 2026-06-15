@@ -71,7 +71,9 @@ impl SniResolver {
             let acme_kv = kv.clone_with_additional_prefix(b"acme/certs");
 
             if let Ok(Some(cert_bytes)) = acme_kv.get_bytes(domain.as_bytes()) {
-                if let Ok(acme_cert) = serde_json::from_slice::<crate::acme::AcmeCertificate>(&cert_bytes) {
+                if let Ok(acme_cert) =
+                    serde_json::from_slice::<crate::acme::AcmeCertificate>(&cert_bytes)
+                {
                     // Check if cert is still valid
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -125,7 +127,8 @@ impl SniResolver {
                             Err(e) => {
                                 error!(domain = %domain_bg, ?e, "Failed to create runtime for background ACME");
                                 // Remove from pending set on error
-                                let mut pending = pending_acme_bg.write().expect("pending acme lock");
+                                let mut pending =
+                                    pending_acme_bg.write().expect("pending acme lock");
                                 pending.remove(&domain_bg);
                                 return;
                             }
@@ -258,7 +261,11 @@ fn generate_wildcard_cert(domain: &str) -> Result<(String, String), String> {
 
     // Add SANs (Subject Alternative Names) for wildcard and base domain
     params.subject_alt_names = vec![
-        SanType::DnsName(format!("*.{}", domain).try_into().map_err(|e| format!("{:?}", e))?),
+        SanType::DnsName(
+            format!("*.{}", domain)
+                .try_into()
+                .map_err(|e| format!("{:?}", e))?,
+        ),
         SanType::DnsName(domain.try_into().map_err(|e| format!("{:?}", e))?),
     ];
 
@@ -383,10 +390,16 @@ mod tests {
         let resolver = SniResolver::new(Arc::new(RwLock::new(namespaced_kv)));
 
         // Single subdomain
-        assert_eq!(resolver.extract_base_domain("gateway.shotgun.dev"), "shotgun.dev");
+        assert_eq!(
+            resolver.extract_base_domain("gateway.shotgun.dev"),
+            "shotgun.dev"
+        );
 
         // Nested subdomains
-        assert_eq!(resolver.extract_base_domain("api.gateway.shotgun.dev"), "shotgun.dev");
+        assert_eq!(
+            resolver.extract_base_domain("api.gateway.shotgun.dev"),
+            "shotgun.dev"
+        );
 
         // Base domain only
         assert_eq!(resolver.extract_base_domain("shotgun.dev"), "shotgun.dev");

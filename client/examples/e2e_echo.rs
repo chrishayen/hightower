@@ -25,7 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn listen(gateway_url: &str, auth_token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let connection = Arc::new(HightowerConnection::connect_ephemeral(gateway_url, auth_token).await?);
+    let connection =
+        Arc::new(HightowerConnection::connect_ephemeral(gateway_url, auth_token).await?);
     println!("E2E_ENDPOINT={}", connection.endpoint_id());
     println!("E2E_ASSIGNED_IP={}", connection.assigned_ip());
 

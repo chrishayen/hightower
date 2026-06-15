@@ -70,7 +70,6 @@ macro_rules! error_session {
 
 #[allow(unused_imports)]
 pub(crate) use {
-    debug_init, debug_resp, debug_session,
-    info_init, info_resp, info_session,
-    error_init, error_resp, error_session,
+    debug_init, debug_resp, debug_session, error_init, error_resp, error_session, info_init,
+    info_resp, info_session,
 };

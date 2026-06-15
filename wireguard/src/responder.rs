@@ -27,6 +27,7 @@ pub struct ResponderState {
 
     // State tracking
     initiation_processed: bool,
+    timestamp: Option<[u8; 12]>,
 }
 
 impl ResponderState {
@@ -54,6 +55,7 @@ impl ResponderState {
             remote_ephemeral_public: None,
             preshared_key,
             initiation_processed: false,
+            timestamp: None,
         }
     }
 
@@ -122,13 +124,18 @@ impl ResponderState {
                 "Invalid decrypted timestamp length".to_string(),
             ));
         }
+        let mut timestamp = [0u8; 12];
+        timestamp.copy_from_slice(&timestamp_decrypted);
+        self.timestamp = Some(timestamp);
         self.hash = hash(&[self.hash.as_slice(), &msg.timestamp_encrypted].concat());
-
-        // TODO: Verify timestamp for replay protection
-        // For now, we just validate the format
 
         self.initiation_processed = true;
         Ok(remote_static_public)
+    }
+
+    /// Timestamp from the processed initiation message.
+    pub fn timestamp(&self) -> Option<[u8; 12]> {
+        self.timestamp
     }
 
     /// Create handshake response message (second message of Noise IK)

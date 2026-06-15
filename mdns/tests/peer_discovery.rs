@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
 #[tokio::test]
+#[ignore = "requires exclusive access to UDP 5353"]
 async fn test_two_peers_can_discover_each_other() {
     // Create two peers with different IPs
     let peer1_ip = Ipv4Addr::new(127, 0, 0, 1);
@@ -43,10 +44,14 @@ async fn test_two_peers_can_discover_each_other() {
     })
     .await;
 
-    assert!(query_result.is_ok(), "Queries should complete within timeout");
+    assert!(
+        query_result.is_ok(),
+        "Queries should complete within timeout"
+    );
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive access to UDP 5353"]
 async fn test_peer_responds_to_query() {
     let ip = Ipv4Addr::new(127, 0, 0, 1);
 

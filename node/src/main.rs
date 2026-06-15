@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 use tracing::{debug, error};
-use tracing_subscriber::{EnvFilter, fmt as tracing_fmt};
+use tracing_subscriber::{fmt as tracing_fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -49,8 +49,7 @@ fn main() {
         .with_target(false)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     let cli = Cli::parse();
 

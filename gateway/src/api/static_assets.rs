@@ -22,11 +22,9 @@ pub async fn serve_static(Path(path): Path<String>) -> Response {
                 .body(body)
                 .unwrap()
         }
-        None => {
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap()
-        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
     }
 }

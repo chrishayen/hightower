@@ -38,8 +38,9 @@ impl ConnectionStorage {
         let data_dir: PathBuf = data_dir.into();
 
         // Create directory if it doesn't exist
-        std::fs::create_dir_all(&data_dir)
-            .map_err(|e| ClientError::Storage(format!("failed to create storage directory: {}", e)))?;
+        std::fs::create_dir_all(&data_dir).map_err(|e| {
+            ClientError::Storage(format!("failed to create storage directory: {}", e))
+        })?;
 
         let mut config = StoreConfig::default();
         config.data_dir = data_dir.to_string_lossy().to_string();
@@ -80,7 +81,8 @@ impl ConnectionStorage {
         without_scheme
             .chars()
             .map(|c| match c {
-                '/' | ':' | '?' | '#' | '[' | ']' | '@' | '!' | '$' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | ';' | '=' => '_',
+                '/' | ':' | '?' | '#' | '[' | ']' | '@' | '!' | '$' | '&' | '\'' | '(' | ')'
+                | '*' | '+' | ',' | ';' | '=' => '_',
                 c if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' => c,
                 _ => '_',
             })
@@ -107,14 +109,16 @@ impl ConnectionStorage {
 
     /// Retrieve the stored connection
     pub fn get_connection(&self) -> Result<Option<StoredConnection>, ClientError> {
-        let value = self.engine
+        let value = self
+            .engine
             .get(CONN_KEY)
             .map_err(|e| ClientError::Storage(format!("failed to retrieve connection: {}", e)))?;
 
         match value {
             Some(bytes) => {
-                let conn: StoredConnection = serde_json::from_slice(&bytes)
-                    .map_err(|e| ClientError::Storage(format!("failed to deserialize connection: {}", e)))?;
+                let conn: StoredConnection = serde_json::from_slice(&bytes).map_err(|e| {
+                    ClientError::Storage(format!("failed to deserialize connection: {}", e))
+                })?;
                 debug!(gateway_url = %conn.gateway_url, endpoint_id = %conn.endpoint_id, "Retrieved stored connection");
                 Ok(Some(conn))
             }

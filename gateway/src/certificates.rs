@@ -1,5 +1,5 @@
-use wireguard::crypto::{PrivateKey, PublicKey25519, dh_generate};
 use serde::{Deserialize, Serialize};
+use wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeCertificate {

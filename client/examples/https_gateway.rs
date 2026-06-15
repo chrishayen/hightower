@@ -2,15 +2,13 @@ use hightower_client::HightowerConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let auth_token = std::env::var("HT_AUTH_TOKEN")
-        .expect("HT_AUTH_TOKEN environment variable must be set");
+    let auth_token =
+        std::env::var("HT_AUTH_TOKEN").expect("HT_AUTH_TOKEN environment variable must be set");
 
     println!("Connecting to HTTPS gateway: https://gateway.example.com:8443");
 
-    let connection = HightowerConnection::connect(
-        "https://gateway.example.com:8443",
-        auth_token
-    ).await?;
+    let connection =
+        HightowerConnection::connect("https://gateway.example.com:8443", auth_token).await?;
 
     println!("\nConnection successful!");
     println!("  Endpoint ID: {}", connection.endpoint_id());

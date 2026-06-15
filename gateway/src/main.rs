@@ -7,10 +7,18 @@ use tracing::error;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Hightower Gateway", long_about = None)]
 struct Cli {
-    #[arg(long = "kv", value_name = "DIR", help = "Path to key-value store directory")]
+    #[arg(
+        long = "kv",
+        value_name = "DIR",
+        help = "Path to key-value store directory"
+    )]
     kv: Option<PathBuf>,
 
-    #[arg(long = "email", value_name = "EMAIL", help = "Email address for Let's Encrypt certificate notifications")]
+    #[arg(
+        long = "email",
+        value_name = "EMAIL",
+        help = "Email address for Let's Encrypt certificate notifications"
+    )]
     email: Option<String>,
 }
 

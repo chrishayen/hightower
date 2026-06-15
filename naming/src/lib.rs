@@ -41,7 +41,10 @@ pub fn generate_random_name(random_suffix_length: Option<usize>) -> String {
 /// let name = hightower_naming::generate_random_name_with_prefix(None, Some(5));
 /// // Example: "brave-tiger-a1b2c"
 /// ```
-pub fn generate_random_name_with_prefix(prefix: Option<&str>, random_suffix_length: Option<usize>) -> String {
+pub fn generate_random_name_with_prefix(
+    prefix: Option<&str>,
+    random_suffix_length: Option<usize>,
+) -> String {
     let mut rng = rand::thread_rng();
     let adjective = adjectives::ADJECTIVES[rng.gen_range(0..adjectives::ADJECTIVES.len())];
     let noun = nouns::NOUNS[rng.gen_range(0..nouns::NOUNS.len())];

@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod keepalive_test {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
 
@@ -118,8 +118,7 @@ mod keepalive_test {
             .add_peer_with_keepalive(bob_public, Some(bob_addr), Some(1))
             .await
             .unwrap();
-        bob
-            .add_peer_with_keepalive(alice_public, Some(alice_addr), Some(1))
+        bob.add_peer_with_keepalive(alice_public, Some(alice_addr), Some(1))
             .await
             .unwrap();
 

@@ -269,7 +269,8 @@ fn bench_prefix_vs_scan(c: &mut Criterion) {
             || prepare_prefix_dataset(10_000, 1000),
             |(harness, prefix)| {
                 let snapshot = harness.engine.read_with(|state| {
-                    state.iter()
+                    state
+                        .iter()
                         .filter(|(k, _)| k.starts_with(&prefix))
                         .map(|(k, (v, _version))| (k.clone(), v.clone()))
                         .collect::<Vec<_>>()

@@ -17,7 +17,7 @@ ht-node [OPTIONS]
 - `HT_AUTH_KEY` - **Required**. Authentication token for connecting to the gateway
 - `RUST_LOG` - Log level (default: `info`). Example values: `debug`, `info`, `warn`, `error`
 - `HT_DEFAULT_USER` - Default admin username (default: `admin`)
-- `HT_DEFAULT_PASSWORD` - Default admin password (default: `admin`)
+- `HT_DEFAULT_PASSWORD` - Initial admin password. Required to bootstrap the console user; `admin` is refused.
 
 ## Example
 

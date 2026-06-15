@@ -1,7 +1,7 @@
 #[cfg(feature = "transport")]
 mod connection_tests {
-    use hightower_wireguard::crypto::dh_generate;
     use hightower_wireguard::connection::Connection;
+    use hightower_wireguard::crypto::dh_generate;
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -108,10 +108,18 @@ mod connection_tests {
 
         // Everyone adds everyone as peers
         alice.add_peer(bob_public, Some(bob_addr)).await.unwrap();
-        alice.add_peer(charlie_public, Some(charlie_addr)).await.unwrap();
+        alice
+            .add_peer(charlie_public, Some(charlie_addr))
+            .await
+            .unwrap();
         bob.add_peer(alice_public, Some(alice_addr)).await.unwrap();
-        bob.add_peer(charlie_public, Some(charlie_addr)).await.unwrap();
-        charlie.add_peer(alice_public, Some(alice_addr)).await.unwrap();
+        bob.add_peer(charlie_public, Some(charlie_addr))
+            .await
+            .unwrap();
+        charlie
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
         charlie.add_peer(bob_public, Some(bob_addr)).await.unwrap();
 
         // Alice listens
@@ -243,9 +251,15 @@ mod connection_tests {
 
         // Add peers
         alice.add_peer(bob_public, Some(bob_addr)).await.unwrap();
-        alice.add_peer(charlie_public, Some(charlie_addr)).await.unwrap();
+        alice
+            .add_peer(charlie_public, Some(charlie_addr))
+            .await
+            .unwrap();
         bob.add_peer(alice_public, Some(alice_addr)).await.unwrap();
-        charlie.add_peer(alice_public, Some(alice_addr)).await.unwrap();
+        charlie
+            .add_peer(alice_public, Some(alice_addr))
+            .await
+            .unwrap();
 
         // Both listen
         let mut bob_incoming = bob.listen().await.unwrap();
@@ -260,12 +274,16 @@ mod connection_tests {
         assert!(alice_to_charlie.is_ok());
 
         // Both should receive connections
-        assert!(timeout(Duration::from_secs(1), bob_incoming.recv())
-            .await
-            .is_ok());
-        assert!(timeout(Duration::from_secs(1), charlie_incoming.recv())
-            .await
-            .is_ok());
+        assert!(
+            timeout(Duration::from_secs(1), bob_incoming.recv())
+                .await
+                .is_ok()
+        );
+        assert!(
+            timeout(Duration::from_secs(1), charlie_incoming.recv())
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -350,8 +368,9 @@ mod connection_tests {
         // This should timeout since no one is listening
         let result = timeout(
             Duration::from_secs(1),
-            alice.connect("127.0.0.1:9999".parse().unwrap(), bob_public)
-        ).await;
+            alice.connect("127.0.0.1:9999".parse().unwrap(), bob_public),
+        )
+        .await;
 
         // Should timeout because no one is listening
         assert!(result.is_err());

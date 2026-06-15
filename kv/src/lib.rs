@@ -20,10 +20,10 @@ pub mod id_generator;
 pub mod index;
 /// Log segment management.
 pub mod log_segment;
-/// Prefix index for efficient prefix queries.
-pub mod prefix_index;
 /// Metrics collection and reporting.
 pub mod metrics;
+/// Prefix index for efficient prefix queries.
+pub mod prefix_index;
 /// Replication protocol implementation.
 pub mod replication;
 /// Snapshot persistence.

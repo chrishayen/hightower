@@ -1,5 +1,5 @@
-use wireguard::connection::Connection;
 use std::sync::Arc;
+use wireguard::connection::Connection;
 
 /// Wrapper around hightower-wireguard transport connection.
 /// Provides access to the underlying transport for communication.
@@ -10,7 +10,9 @@ pub struct TransportServer {
 
 impl TransportServer {
     pub(crate) fn new(connection: Connection) -> Self {
-        Self { connection: Arc::new(connection) }
+        Self {
+            connection: Arc::new(connection),
+        }
     }
 
     /// Get a reference to the underlying transport connection

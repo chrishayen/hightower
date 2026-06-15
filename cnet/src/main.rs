@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tracing::{error, info, warn};
 
 #[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -14,14 +14,14 @@ async fn main() -> Result<()> {
 
     info!("Starting Hightower WireGuard sidecar");
 
-    let auth_token = std::env::var("HT_AUTH_TOKEN")
-        .context("HT_AUTH_TOKEN environment variable must be set")?;
+    let auth_token =
+        std::env::var("HT_AUTH_TOKEN").context("HT_AUTH_TOKEN environment variable must be set")?;
 
-    let gateway_url = std::env::var("HT_GATEWAY_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
+    let gateway_url =
+        std::env::var("HT_GATEWAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8008".to_string());
 
-    let target_addr = std::env::var("HT_TARGET_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:80".to_string());
+    let target_addr =
+        std::env::var("HT_TARGET_ADDR").unwrap_or_else(|_| "127.0.0.1:80".to_string());
 
     info!("Connecting to gateway: {}", gateway_url);
 

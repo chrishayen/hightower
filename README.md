@@ -113,7 +113,7 @@ For local development, run the gateway with HTTP enabled on port `8008`:
 ```bash
 HT_AUTH_KEY=test-auth-key \
 HT_DEFAULT_USER=admin \
-HT_DEFAULT_PASSWORD=admin \
+HT_DEFAULT_PASSWORD=local-admin-password \
 DISABLE_HTTPS=true \
 HTTP_PORT=8008 \
 RUST_LOG=debug \

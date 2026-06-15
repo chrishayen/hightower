@@ -8,6 +8,11 @@ pub(crate) use certificates::persist_certificate;
 use crate::context::{CommonContext, GatewayAuthService, NamespacedKv, HT_AUTH_KEY};
 use crate::tls::SniResolver;
 use axum::{
+    http::{
+        header::{HOST, LOCATION},
+        HeaderMap, StatusCode, Uri,
+    },
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -249,6 +254,49 @@ fn build_router(shared_kv: Arc<RwLock<NamespacedKv>>, auth: Arc<GatewayAuthServi
         })
 }
 
+fn build_http_redirect_router(https_addr: SocketAddr) -> Router {
+    Router::new()
+        .route("/api/health", get(root_health))
+        .route("/.well-known/acme-challenge/:token", get(acme_challenge))
+        .fallback(move |headers: HeaderMap, uri: Uri| {
+            redirect_to_https(headers, uri, https_addr.port())
+        })
+}
+
+async fn redirect_to_https(headers: HeaderMap, uri: Uri, https_port: u16) -> Response {
+    let Some(host) = headers.get(HOST).and_then(|value| value.to_str().ok()) else {
+        return (StatusCode::BAD_REQUEST, "missing Host header").into_response();
+    };
+
+    let host = https_redirect_host(host, https_port);
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    let location = format!("https://{}{}", host, path_and_query);
+
+    (StatusCode::PERMANENT_REDIRECT, [(LOCATION, location)], "").into_response()
+}
+
+fn https_redirect_host(host: &str, https_port: u16) -> String {
+    let host_without_port = if let Some(rest) = host.strip_prefix('[') {
+        match rest.find(']') {
+            Some(index) => format!("[{}]", &rest[..index]),
+            None => host.to_owned(),
+        }
+    } else {
+        host.split_once(':')
+            .map(|(name, _)| name.to_owned())
+            .unwrap_or_else(|| host.to_owned())
+    };
+
+    if https_port == 443 {
+        host_without_port
+    } else {
+        format!("{}:{}", host_without_port, https_port)
+    }
+}
+
 async fn start_servers(
     shared_kv: Arc<RwLock<NamespacedKv>>,
     auth: Arc<GatewayAuthService>,
@@ -303,9 +351,15 @@ async fn start_servers(
         }
     }
 
+    let redirect_http_to_https = https_listener.is_ok() && !config.https_disabled;
+
     // Start HTTP server if bound successfully
     let http_server = if let Ok(listener) = http_listener {
-        let http_app = app.clone();
+        let http_app = if redirect_http_to_https {
+            build_http_redirect_router(https_addr)
+        } else {
+            app.clone()
+        };
         Some(tokio::spawn(async move {
             debug!(address = %http_addr, "HTTP server ready");
             axum::serve(listener, http_app).await?;

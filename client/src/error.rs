@@ -39,7 +39,7 @@ pub enum ClientError {
         /// HTTP status code returned by gateway
         status: u16,
         /// Error message from gateway response body
-        message: String
+        message: String,
     },
 
     /// Gateway response was not in the expected format

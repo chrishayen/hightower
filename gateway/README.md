@@ -36,7 +36,7 @@ The gateway can be configured using environment variables:
 
 - `HT_AUTH_KEY` - Authentication key for the gateway (required)
 - `HT_DEFAULT_USER` - Default admin username (default: `admin`)
-- `HT_DEFAULT_PASSWORD` - Default admin password (default: `admin`)
+- `HT_DEFAULT_PASSWORD` - Initial admin password. Required to bootstrap the console user; `admin` is refused.
 - `RUST_LOG` - Log level (default: `info`, use `debug` for verbose output)
 
 ## Key-Value Store

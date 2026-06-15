@@ -1,21 +1,21 @@
+use super::TimeoutConfig;
 use super::error::Error;
 use super::logging::*;
 use super::session::{HandshakeReply, PendingHandshake, SessionId, SessionState};
 use super::stream::{Command, Stream, StreamId, StreamState};
-use super::TimeoutConfig;
 use crate::crypto::{PrivateKey, PublicKey25519};
 use crate::messages::{
-    HandshakeInitiation, HandshakeResponse, TransportData, MESSAGE_HANDSHAKE_INITIATION,
-    MESSAGE_HANDSHAKE_RESPONSE,
+    HandshakeInitiation, HandshakeResponse, MESSAGE_HANDSHAKE_INITIATION,
+    MESSAGE_HANDSHAKE_RESPONSE, TransportData,
 };
 use crate::protocol::{PeerInfo, WireGuardProtocol};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use stun::{
-    StunMessage, TransactionId, BINDING_RESPONSE, MAGIC_COOKIE, MAPPED_ADDRESS, XOR_MAPPED_ADDRESS,
+    BINDING_RESPONSE, MAGIC_COOKIE, MAPPED_ADDRESS, StunMessage, TransactionId, XOR_MAPPED_ADDRESS,
 };
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
@@ -587,7 +587,9 @@ impl ConnectionActor {
         if !self.create_session_from_response(response.sender, peer_public_key, from, true) {
             error_init!(
                 "Failed to create new session after rekey (possible ID collision): old_session_id={}, new_session_id={}",
-                old_session_id.0, response.sender);
+                old_session_id.0,
+                response.sender
+            );
             return;
         }
 
@@ -619,9 +621,6 @@ impl ConnectionActor {
                     return;
                 }
             };
-
-            session_state.endpoint = Some(from);
-            session_state.last_recv = Instant::now();
 
             let session = match session_state.get_active_session() {
                 Some(s) => s,
@@ -659,6 +658,11 @@ impl ConnectionActor {
                 e
             );
             return;
+        }
+
+        if let Some(session_state) = self.sessions.get_mut(&session_id) {
+            session_state.endpoint = Some(from);
+            session_state.last_recv = Instant::now();
         }
 
         if plaintext.is_empty() {

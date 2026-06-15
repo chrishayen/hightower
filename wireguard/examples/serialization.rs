@@ -44,9 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Simulate network transmission by deserializing
     println!("\n2. Transmitting over network...");
-    let received_initiation = hightower_wireguard::messages::HandshakeInitiation::from_bytes(
-        &initiation_bytes,
-    )?;
+    let received_initiation =
+        hightower_wireguard::messages::HandshakeInitiation::from_bytes(&initiation_bytes)?;
     println!("   Bob received and deserialized initiation");
     println!("   Sender ID: {}", received_initiation.sender);
 
@@ -73,7 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 3: Alice processes response
     println!("\n5. Alice processes response");
     let peer_key = alice.process_response(&received_response)?;
-    println!("   Handshake complete with peer: {:02x?}...", &peer_key[..8]);
+    println!(
+        "   Handshake complete with peer: {:02x?}...",
+        &peer_key[..8]
+    );
 
     // Verify sessions are established
     let alice_session = alice.get_session(received_response.sender).unwrap();

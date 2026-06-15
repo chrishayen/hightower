@@ -1,6 +1,6 @@
+use super::error::Error;
 use crate::crypto::PublicKey25519;
 use crate::protocol::ActiveSession;
-use super::error::Error;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
@@ -21,7 +21,12 @@ pub(super) struct SessionState {
 }
 
 impl SessionState {
-    pub fn new(peer_public_key: PublicKey25519, endpoint: Option<SocketAddr>, session: ActiveSession, is_initiator: bool) -> Self {
+    pub fn new(
+        peer_public_key: PublicKey25519,
+        endpoint: Option<SocketAddr>,
+        session: ActiveSession,
+        is_initiator: bool,
+    ) -> Self {
         let now = Instant::now();
         Self {
             peer_public_key,
@@ -38,7 +43,8 @@ impl SessionState {
 
     pub fn needs_keepalive(&self, now: Instant) -> bool {
         let time_since_send = now.duration_since(self.last_send);
-        let keepalive_interval = self.persistent_keepalive
+        let keepalive_interval = self
+            .persistent_keepalive
             .map(|s| Duration::from_secs(s as u64))
             .unwrap_or(crate::protocol::KEEPALIVE_TIMEOUT);
 
@@ -85,7 +91,9 @@ impl SessionState {
             _ => Vec::new(),
         };
 
-        self.state = SessionStateInner::Active { session: new_session };
+        self.state = SessionStateInner::Active {
+            session: new_session,
+        };
         self.created_at = Instant::now();
         self.send_counter = 0;
 

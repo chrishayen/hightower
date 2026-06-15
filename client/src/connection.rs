@@ -16,6 +16,7 @@ use wireguard::crypto::{dh_generate, PrivateKey, PublicKey25519};
 
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8008";
 const API_PATH: &str = "/api/endpoints";
+const ENDPOINT_AUTH_HEADER: &str = "X-HT-Endpoint-Token";
 
 /// Main connection to Hightower gateway with integrated WireGuard transport
 ///
@@ -561,6 +562,7 @@ impl HightowerConnection {
         let response = client
             .post(&url)
             .header("X-HT-Auth", &self.auth_token)
+            .header(ENDPOINT_AUTH_HEADER, &self.token)
             .json(&ConnectionIntentRequest {
                 target: target.to_string(),
                 port,
@@ -583,6 +585,7 @@ impl HightowerConnection {
         let response = client
             .get(&url)
             .header("X-HT-Auth", &self.auth_token)
+            .header(ENDPOINT_AUTH_HEADER, &self.token)
             .send()
             .await?;
 
